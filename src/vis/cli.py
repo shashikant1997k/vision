@@ -62,6 +62,36 @@ def build_code_demo_recipe() -> Recipe:
     )
 
 
+def build_ocr_demo_recipe() -> Recipe:
+    """Demo for the `ocr` source: each product has a real GS1 code (code_verify)
+    plus a printed lot text field verified by OCR (ocv_text)."""
+
+    def product_region(idx: int, x0: int, serial: str) -> Region:
+        roi = ROI(x=x0, y=0, w=360, h=440)
+        tools = [
+            ToolSpec(
+                f"r{idx}_code",
+                "code_verify",
+                ROI(30, 30, 300, 300),
+                {"gs1": True, "expected_data": _gs1(serial)},
+            ),
+            ToolSpec(
+                f"r{idx}_lot",
+                "ocv_text",
+                ROI(0, 340, 360, 90),
+                {"expected": "LOT42", "uppercase": True},
+            ),
+        ]
+        return Region(f"region{idx}", f"Product {idx}", roi, f"lane{idx}", tools)
+
+    return Recipe(
+        recipe_id="ocr-demo",
+        product="Demo Tablets 500mg (GS1 + OCR)",
+        version=1,
+        regions=[product_region(1, 0, "SN0001"), product_region(2, 400, "SN0002")],
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Walking-skeleton inspection demo")
     parser.add_argument("--frames", type=int, default=10)
@@ -78,9 +108,10 @@ def main() -> None:
     parser.add_argument("--tcp-format", choices=("json", "csv"), default="json")
     parser.add_argument(
         "--source",
-        choices=("sim", "fake"),
+        choices=("sim", "ocr", "fake"),
         default="sim",
-        help="sim = rendered real GS1 codes (needs qrcode); fake = pixel-stub OCV only",
+        help="sim = GS1 codes (needs qrcode); ocr = GS1 + real OCR text (needs ocr extra); "
+        "fake = pixel-stub OCV only",
     )
     parser.add_argument(
         "--db",
@@ -89,10 +120,10 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    if args.source == "sim":
+    if args.source in ("sim", "ocr"):
         from .engine.sim import SimulatedCodeCamera
 
-        recipe = build_code_demo_recipe()
+        recipe = build_ocr_demo_recipe() if args.source == "ocr" else build_code_demo_recipe()
         camera = SimulatedCodeCamera(
             "cam1", recipe, num_frames=args.frames, defect_rate=args.defect_rate
         )

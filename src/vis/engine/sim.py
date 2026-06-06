@@ -20,6 +20,35 @@ from .camera import Camera
 from .frame import Frame
 
 
+_FONT_PATHS = [
+    "/System/Library/Fonts/Supplemental/Arial.ttf",
+    "/System/Library/Fonts/Helvetica.ttc",
+    "/Library/Fonts/Arial.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "C:\\Windows\\Fonts\\arial.ttf",
+]
+
+
+def _render_text(text: str, w: int, h: int) -> np.ndarray:
+    """Render printed text into a white ROI (for the OCR/OCV demo)."""
+    from PIL import Image, ImageDraw, ImageFont
+
+    img = Image.new("RGB", (w, h), "white")
+    draw = ImageDraw.Draw(img)
+    font = None
+    fontsize = max(20, int(h * 0.5))
+    for path in _FONT_PATHS:
+        try:
+            font = ImageFont.truetype(path, fontsize)
+            break
+        except OSError:
+            continue
+    if font is None:
+        font = ImageFont.load_default()
+    draw.text((int(w * 0.08), int(h * 0.18)), text, fill="black", font=font)
+    return np.array(img, dtype=np.uint8)
+
+
 def _render_qr(text: str, w: int, h: int) -> np.ndarray:
     import qrcode
     from PIL import Image
@@ -77,6 +106,11 @@ class SimulatedCodeCamera(Camera):
             if defective:
                 data = data.replace("LOT42", "LOT99")  # simulate a misprint
             img[y0 : y0 + roi.h, x0 : x0 + roi.w] = _render_qr(data, roi.w, roi.h)
+        elif tool.tool_type == "ocv_text":
+            text = str(tool.config.get("expected", ""))
+            if defective and text:
+                text = text[:-1] + ("9" if text[-1] != "9" else "8")  # alter last char
+            img[y0 : y0 + roi.h, x0 : x0 + roi.w] = _render_text(text, roi.w, roi.h)
         elif tool.tool_type == "ocv_stub":
             expected = int(tool.config.get("expected", 0))
             value = (expected + 1) % 256 if defective else expected

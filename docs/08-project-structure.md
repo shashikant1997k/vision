@@ -14,6 +14,7 @@ src/vis/
 │   ├── registry.py    # type -> tool class; build_tool()
 │   ├── stub_ocv.py    # placeholder OCV tool (→ ONNX PaddleOCR in Phase 1, docs/05)
 │   ├── code_verify.py # REAL tool: 1D/2D decode + GS1 verify + approximate grade (D-012)
+│   ├── ocr.py         # REAL tool: OCV text (lot/expiry/MRP) via ONNX PaddleOCR/RapidOCR (docs/05)
 │   ├── decode.py      # zxing-cpp wrapper (reads raw bytes to preserve GS1 0x1d separator)
 │   ├── gs1.py         # GS1 Application Identifier parser (01 GTIN / 17 expiry / 10 batch / 21 serial)
 │   └── grading.py     # approximate process-control grade (NOT a certified ISO verifier grade)
@@ -48,6 +49,7 @@ tests/
 ├── test_pipeline.py    # end-to-end pipeline (all-pass and all-reject)
 ├── test_gs1.py         # GS1 AI parser
 ├── test_code_verify.py # real QR decode + verify + grade
+├── test_ocr.py         # real OCR text read + match/regex + pipeline
 ├── test_sim.py         # simulated code line, multi-product
 ├── test_audit.py       # audit hash-chain validity + tamper detection
 ├── test_persistence.py # results persisted; recipe save/approve audited + RBAC-gated

@@ -16,7 +16,7 @@ The must-ship core that makes us credible and deployable on a real pharma line.
 - [ ] **Per-region reject routing** to the correct lane/output, with per-lane eject timing; last-reject image review.
 
 ### Inspection tools (classic — the revenue core)
-- [ ] **OCR/OCV** for fixed + variable text (lot, expiry, MRP) with a date/format rule engine.
+- [x] **OCR/OCV** for fixed + variable text (lot, expiry, MRP) — *done: ONNX PaddleOCR/RapidOCR, exact/contains/regex matching; INT8 rec-only throughput path still TODO*.
 - [ ] **1D/2D code read + verify** — GS1 DataMatrix, GS1-128, QR, DataBar, Pharmacode — decode + **content verification** (GTIN/batch/expiry/serial match expected).
 - [ ] **Inline approximate ISO 15415/15416 quality metrics** — logged as **"process-control grade, not certified"** (certified grading = sampling workflow with a verifier; see [D-012](decisions/decision-log.md)).
 - [ ] **GS1 AI parsing** (01/10/17/21 → structured fields). *Serialization-ready hook.*

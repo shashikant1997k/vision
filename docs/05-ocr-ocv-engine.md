@@ -2,6 +2,15 @@
 
 The throughput-critical subsystem. OCR/OCV is the expensive part, so it is designed as a first-class, budgeted pipeline.
 
+## Implemented (current)
+
+`src/vis/tools/ocr.py` — `OcrTextTool` (type `ocv_text`) uses **RapidOCR (PP-OCR on ONNX
+Runtime)**, the cross-platform "ONNX PaddleOCR" path (runs on macOS, CPU). Engine loaded once
+per process (warm). Supports exact / contains / regex matching (regex validates date/format),
+case + whitespace normalisation, and a confidence floor. Currently runs the **full det+rec
+pipeline** for robustness; the **recognition-only + INT8 mobile** fast path below is the
+production throughput optimisation (not yet wired). Optional dep: `pip install '.[ocr]'`.
+
 ## Targets & constraints
 
 - **Throughput:** baseline reference 1000 images/min ≈ ~17 frames/sec. **But with multi-camera + multi-product-in-FOV (Phase 1), size on total ops:** `ops/min = frames/min × cameras × regions-per-frame × ROIs-per-region`. A single frame can now yield many OCV ops, so the worker pool must be sized on ops, not frames. **This is a CPU-only sizing risk — must be measured on a real spike** (see backlog).

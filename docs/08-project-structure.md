@@ -29,10 +29,21 @@ src/vis/
 │   └── pipeline.py  # frame -> crop -> pool -> aggregate -> publish results/rejects
 ├── models/
 │   └── registry.py  # ModelRegistry — locked, hashed, versioned models (D-007)
-└── cli.py           # build_demo_recipe() + runnable demo entrypoint
+├── db/              # persistence + audit (docs/09, D-013)
+│   ├── base.py      # engine/session factory, Base, JSONType (JSONB on PG)
+│   ├── models.py    # ORM models (users, recipes, batches, results, audit, ...)
+│   ├── audit.py     # AuditService — append-only, hash-chained, tamper-evident
+│   └── store.py     # ResultStore (persist results) + RecipeRepository (versioned + audited)
+└── cli.py           # demo recipes + runnable entrypoint (--source, --tcp-server, --db)
+alembic/             # PostgreSQL migration scaffolding (env.py wired to Base.metadata)
 tests/
-├── test_tools.py    # tool interface + registry
-└── test_pipeline.py # end-to-end pipeline (all-pass and all-reject)
+├── test_tools.py       # tool interface + registry
+├── test_pipeline.py    # end-to-end pipeline (all-pass and all-reject)
+├── test_gs1.py         # GS1 AI parser
+├── test_code_verify.py # real QR decode + verify + grade
+├── test_sim.py         # simulated code line, multi-product
+├── test_audit.py       # audit hash-chain validity + tamper detection
+└── test_persistence.py # results persisted; recipe save/approve audited
 ```
 
 ## The seams (where real implementations drop in)

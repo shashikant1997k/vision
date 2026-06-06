@@ -4,13 +4,14 @@ version = "0.0.1"
 description = "Pharma inline print & code verification system"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = ["numpy>=1.24"]
+dependencies = ["numpy>=1.24", "SQLAlchemy>=2.0"]
 
 # Optional heavy deps are not needed for the walking skeleton.
 [project.optional-dependencies]
 codes = ["zxing-cpp>=2.2"]        # 1D/2D decode: DataMatrix, QR, Code128, ... (cross-platform wheels)
 engine = ["onnxruntime>=1.17", "opencv-python>=4.9"]
 camera = ["harvesters>=1.4"]      # GenICam/GigE acquisition (Windows; see D-011)
+postgres = ["psycopg[binary]>=3.1", "alembic>=1.13"]  # production DB driver + migrations (D-013)
 dev = ["pytest>=8.0", "ruff>=0.4", "zxing-cpp>=2.2", "qrcode[pil]>=7.4"]
 
 [project.scripts]

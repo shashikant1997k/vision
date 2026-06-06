@@ -82,6 +82,11 @@ def main() -> None:
         default="sim",
         help="sim = rendered real GS1 codes (needs qrcode); fake = pixel-stub OCV only",
     )
+    parser.add_argument(
+        "--db",
+        default="",
+        help="if set (e.g. sqlite:///run.db), persist inspection results to this DB",
+    )
     args = parser.parse_args()
 
     if args.source == "sim":
@@ -110,6 +115,15 @@ def main() -> None:
         fmt = format_json if args.tcp_format == "json" else format_delimited
         bus.subscribe("inspection.result", ResultPublisher(transport, fmt).on_result)
         print(f"[tcp] publishing results on 0.0.0.0:{transport.port} ({args.tcp_format})")
+
+    if args.db:
+        from .db.base import init_db, make_engine, make_session_factory
+        from .db.store import ResultStore
+
+        engine = make_engine(args.db)
+        init_db(engine)
+        bus.subscribe("inspection.result", ResultStore(make_session_factory(engine)).on_result)
+        print(f"[db] persisting results to {args.db}")
 
     pipeline = InspectionPipeline(recipe, pool, bus)
 

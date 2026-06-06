@@ -10,9 +10,13 @@ src/vis/
 │   ├── types.py     # ROI + crop()  (geometry)
 │   └── events.py    # EventBus — internal pub/sub; Phase-2 serialization subscribes here (D-003)
 ├── tools/
-│   ├── base.py      # InspectionTool ABC + ToolResult — the ONE interface all tools implement (D-004)
-│   ├── registry.py  # type -> tool class; build_tool()
-│   └── stub_ocv.py  # placeholder OCV tool (→ ONNX PaddleOCR in Phase 1, docs/05)
+│   ├── base.py        # InspectionTool ABC + ToolResult — the ONE interface all tools implement (D-004)
+│   ├── registry.py    # type -> tool class; build_tool()
+│   ├── stub_ocv.py    # placeholder OCV tool (→ ONNX PaddleOCR in Phase 1, docs/05)
+│   ├── code_verify.py # REAL tool: 1D/2D decode + GS1 verify + approximate grade (D-012)
+│   ├── decode.py      # zxing-cpp wrapper (reads raw bytes to preserve GS1 0x1d separator)
+│   ├── gs1.py         # GS1 Application Identifier parser (01 GTIN / 17 expiry / 10 batch / 21 serial)
+│   └── grading.py     # approximate process-control grade (NOT a certified ISO verifier grade)
 ├── domain/
 │   └── entities.py  # Recipe -> Region -> ToolSpec (multi-product, D-010); CameraConfig
 ├── engine/
@@ -36,6 +40,7 @@ tests/
 |---|---|---|
 | `engine/camera.py` | `FakeCamera` generates synthetic frames | GenICam/Harvester GigE acquisition, 1 process per camera (D-011) |
 | `tools/stub_ocv.py` | reads a pixel value | ONNX PaddleOCR mobile, recognition-only OCV (docs/05) |
+| `tools/code_verify.py` | **real** decode + GS1 verify + approx grade | add verifier-SDK integration for certified grading on sampling (D-012) |
 | `engine/pool.py` | `ProcessPool` runs stub tools | same pool, warm ONNX sessions loaded in `worker_init()` |
 | `domain/entities.py` | in-memory dataclasses | DB-backed, versioned recipes + full data model (docs/04) |
 | `common/events.py` | in-process bus | audit sink, reporting, Phase-2 serialization subscribers |

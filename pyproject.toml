@@ -8,9 +8,10 @@ dependencies = ["numpy>=1.24"]
 
 # Optional heavy deps are not needed for the walking skeleton.
 [project.optional-dependencies]
-engine = ["onnxruntime>=1.17", "opencv-python>=4.9", "pylibdmtx>=0.1.10"]
+codes = ["zxing-cpp>=2.2"]        # 1D/2D decode: DataMatrix, QR, Code128, ... (cross-platform wheels)
+engine = ["onnxruntime>=1.17", "opencv-python>=4.9"]
 camera = ["harvesters>=1.4"]      # GenICam/GigE acquisition (Windows; see D-011)
-dev = ["pytest>=8.0", "ruff>=0.4"]
+dev = ["pytest>=8.0", "ruff>=0.4", "zxing-cpp>=2.2", "qrcode[pil]>=7.4"]
 
 [project.scripts]
 vis-demo = "vis.cli:main"

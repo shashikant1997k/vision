@@ -24,7 +24,7 @@ DEFAULT_ROLES: dict[str, list[str]] = {
         Perm.USER_MANAGE,
         Perm.AUDIT_VIEW,
     ],
-    "qa_manager": [Perm.RECIPE_CREATE, Perm.RECIPE_APPROVE, Perm.AUDIT_VIEW],
+    "qa_manager": [Perm.RECIPE_CREATE, Perm.RECIPE_APPROVE, Perm.BATCH_MANAGE, Perm.AUDIT_VIEW],
     "engineer": [Perm.RECIPE_CREATE, Perm.BATCH_MANAGE],
     "operator": [Perm.BATCH_MANAGE],
 }

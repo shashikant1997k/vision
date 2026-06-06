@@ -41,9 +41,9 @@ The must-ship core that makes us credible and deployable on a real pharma line.
 - [ ] Data integrity (ALCOA+); image archival policy & retention.
 
 ### Batch & reporting
-- [ ] Batch create / start / pause / resume / close; variable data per batch.
-- [ ] Live counters by reject reason.
-- [ ] Batch report (PDF/CSV): counts, defect Pareto, sample fail images, sign-off.
+- [x] Batch create / start / close (release e-signature); variable data per batch — *done; pause/resume TODO*.
+- [x] Counters by reject reason (rejects by lane, defects-by-tool Pareto) — *done*.
+- [x] Batch report (CSV + signed HTML): counts, defect Pareto, sign-off — *done; PDF + sample fail images TODO*.
 
 ### Architecture foundations (invisible but critical)
 - [ ] Plugin "inspection tool" interface (AI tools drop in identically later).

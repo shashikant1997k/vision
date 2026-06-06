@@ -37,7 +37,10 @@ src/vis/
 │   ├── models.py    # ORM models (users, recipes, batches, results, audit, ...)
 │   ├── audit.py     # AuditService — append-only, hash-chained, tamper-evident
 │   ├── users.py     # UserService — create/authenticate (lockout) + verify_user (e-sign re-auth)
+│   ├── batches.py   # BatchService — start (approved recipe) + close (release e-signature)
 │   └── store.py     # ResultStore (persist results) + RecipeRepository (RBAC + e-sign + audited)
+├── reporting/
+│   └── batch_report.py # compute_summary + CSV export + signed HTML batch report
 └── cli.py           # demo recipes + runnable entrypoint (--source, --tcp-server, --db)
 alembic/             # PostgreSQL migration scaffolding (env.py wired to Base.metadata)
 tests/
@@ -48,7 +51,8 @@ tests/
 ├── test_sim.py         # simulated code line, multi-product
 ├── test_audit.py       # audit hash-chain validity + tamper detection
 ├── test_persistence.py # results persisted; recipe save/approve audited + RBAC-gated
-└── test_auth.py        # password hashing/policy, authenticate, lockout, permissions
+├── test_auth.py        # password hashing/policy, authenticate, lockout, permissions
+└── test_batch.py       # batch start/close, results→batch, signed report, audit
 ```
 
 ## The seams (where real implementations drop in)

@@ -8,6 +8,7 @@ from .domain.entities import Recipe, Region, ToolSpec
 from .engine.camera import FakeCamera
 from .engine.pipeline import InspectionPipeline
 from .engine.pool import ProcessPool, SyncPool
+from .tools.gs1 import GS
 
 
 def build_demo_recipe() -> Recipe:
@@ -31,6 +32,36 @@ def build_demo_recipe() -> Recipe:
     )
 
 
+def _gs1(serial: str) -> str:
+    """A GS1 element string: 01 GTIN | 17 expiry | 10 batch <GS> 21 serial."""
+    return "01" + "09506000134352" + "17" + "261231" + "10" + "LOT42" + GS + "21" + serial
+
+
+def build_code_demo_recipe() -> Recipe:
+    """Demo for the `sim` source: two products in one FOV, each with a real GS1
+    code (code_verify) plus an OCV text field (ocv_stub)."""
+
+    def product_region(idx: int, x0: int, serial: str) -> Region:
+        roi = ROI(x=x0, y=0, w=360, h=480)
+        tools = [
+            ToolSpec(
+                f"r{idx}_code",
+                "code_verify",
+                ROI(30, 30, 300, 300),
+                {"gs1": True, "expected_data": _gs1(serial)},
+            ),
+            ToolSpec(f"r{idx}_lot", "ocv_stub", ROI(30, 360, 60, 20), {"expected": 42}),
+        ]
+        return Region(f"region{idx}", f"Product {idx}", roi, f"lane{idx}", tools)
+
+    return Recipe(
+        recipe_id="code-demo",
+        product="Demo Tablets 500mg (GS1)",
+        version=1,
+        regions=[product_region(1, 0, "SN0001"), product_region(2, 400, "SN0002")],
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Walking-skeleton inspection demo")
     parser.add_argument("--frames", type=int, default=10)
@@ -45,9 +76,25 @@ def main() -> None:
         help="if >0, publish results to third-party apps over TCP on this port",
     )
     parser.add_argument("--tcp-format", choices=("json", "csv"), default="json")
+    parser.add_argument(
+        "--source",
+        choices=("sim", "fake"),
+        default="sim",
+        help="sim = rendered real GS1 codes (needs qrcode); fake = pixel-stub OCV only",
+    )
     args = parser.parse_args()
 
-    recipe = build_demo_recipe()
+    if args.source == "sim":
+        from .engine.sim import SimulatedCodeCamera
+
+        recipe = build_code_demo_recipe()
+        camera = SimulatedCodeCamera(
+            "cam1", recipe, num_frames=args.frames, defect_rate=args.defect_rate
+        )
+    else:
+        recipe = build_demo_recipe()
+        camera = FakeCamera("cam1", recipe, num_frames=args.frames, defect_rate=args.defect_rate)
+
     pool = ProcessPool(args.workers) if args.workers > 0 else SyncPool()
     bus = EventBus()
     rejects: list = []
@@ -65,7 +112,6 @@ def main() -> None:
         print(f"[tcp] publishing results on 0.0.0.0:{transport.port} ({args.tcp_format})")
 
     pipeline = InspectionPipeline(recipe, pool, bus)
-    camera = FakeCamera("cam1", recipe, num_frames=args.frames, defect_rate=args.defect_rate)
 
     total = passed = 0
     for frame in camera.frames():
@@ -73,7 +119,9 @@ def main() -> None:
             total += 1
             passed += int(r.passed)
             status = "PASS" if r.passed else f"REJECT -> {r.reject_output}"
-            print(f"frame {frame.frame_id:>3}  {r.region_id}: {status}")
+            codes = [tr for tr in r.tool_results if tr.detail.get("grade")]
+            extra = f"  [grade {codes[0].detail['grade']['overall']}]" if codes else ""
+            print(f"frame {frame.frame_id:>3}  {r.region_id}: {status}{extra}")
     pool.close()
     if transport is not None:
         transport.close()

@@ -22,6 +22,7 @@ src/vis/
 ├── engine/
 │   ├── frame.py     # Frame (image + provenance)
 │   ├── camera.py    # Camera ABC + FakeCamera (→ Harvester/GenICam in Phase 1, D-011)
+│   ├── sim.py       # SimulatedCodeCamera — renders REAL GS1 codes for demos/tests (dev only)
 │   ├── workers.py   # ToolTask / ToolOutcome + run_tool_task() (warm per-process tool cache)
 │   ├── pool.py      # SyncPool (in-process) and ProcessPool (multiprocessing, docs/05)
 │   ├── aggregator.py# group tool outcomes -> per-region pass/fail + reject routing

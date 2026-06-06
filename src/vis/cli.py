@@ -38,6 +38,13 @@ def main() -> None:
         "--workers", type=int, default=0, help="0 = in-process SyncPool; >0 = ProcessPool"
     )
     parser.add_argument("--defect-rate", type=float, default=0.2)
+    parser.add_argument(
+        "--tcp-server",
+        type=int,
+        default=0,
+        help="if >0, publish results to third-party apps over TCP on this port",
+    )
+    parser.add_argument("--tcp-format", choices=("json", "csv"), default="json")
     args = parser.parse_args()
 
     recipe = build_demo_recipe()
@@ -45,6 +52,17 @@ def main() -> None:
     bus = EventBus()
     rejects: list = []
     bus.subscribe("inspection.reject", rejects.append)
+
+    transport = None
+    if args.tcp_server > 0:
+        from .integrations.format import format_delimited, format_json
+        from .integrations.publisher import ResultPublisher
+        from .integrations.tcp import TcpResultServer
+
+        transport = TcpResultServer(host="0.0.0.0", port=args.tcp_server)
+        fmt = format_json if args.tcp_format == "json" else format_delimited
+        bus.subscribe("inspection.result", ResultPublisher(transport, fmt).on_result)
+        print(f"[tcp] publishing results on 0.0.0.0:{transport.port} ({args.tcp_format})")
 
     pipeline = InspectionPipeline(recipe, pool, bus)
     camera = FakeCamera("cam1", recipe, num_frames=args.frames, defect_rate=args.defect_rate)
@@ -57,6 +75,8 @@ def main() -> None:
             status = "PASS" if r.passed else f"REJECT -> {r.reject_output}"
             print(f"frame {frame.frame_id:>3}  {r.region_id}: {status}")
     pool.close()
+    if transport is not None:
+        transport.close()
 
     pool_kind = f"ProcessPool({args.workers})" if args.workers > 0 else "SyncPool"
     print(f"\n[{pool_kind}] {passed}/{total} regions passed; {len(rejects)} rejects routed")

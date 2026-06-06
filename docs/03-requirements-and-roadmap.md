@@ -31,6 +31,9 @@ The must-ship core that makes us credible and deployable on a real pharma line.
 - [ ] Two-tier teach UI: guided wizard (QA operators) + advanced (role-gated).
 - [ ] Recipe clone / import / export.
 
+### External integration
+- [ ] **TCP/IP result publishing to third-party apps** — configurable TCP server/client, JSON or delimited format, real-time push per result, store-and-forward + auto-reconnect (D-014).
+
 ### Compliance (non-negotiable, day one)
 - [ ] RBAC (roles + rights), secure login, password policy, idle logout.
 - [ ] **Read-only, no-delete, time-stamped audit trail** (who/what/when, old→new).

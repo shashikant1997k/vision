@@ -66,7 +66,8 @@ Frames move via **shared memory**; only small handles/ROIs cross queues. The OCR
 | 1D/2D decode | **libdmtx / ZXing / zbar** + ISO 15415/15416 grading (lib or in-house) | Grading is a real algorithm, not just decode |
 | Backend/API | **FastAPI** | Async, typed, serves web UI + internal API |
 | Web UI | **React** (or server-rendered) | Admin, recipes, reports, audit |
-| Database | **PostgreSQL** (single-station: SQLite acceptable) | Robust, good for append-only audit & integrity |
+| Database | **PostgreSQL + JSONB**, via SQLAlchemy + Alembic | DB-level append-only audit; JSONB for variable configs; SQLite for tests only (D-013) |
+| External integration | **TCP/IP result publishing** (server/client, JSON or delimited) | Push scanned data to any third-party app; via EventBus (D-014) |
 | IPC | `multiprocessing` + `shared_memory` + bounded queues | Same-host, low latency |
 | Reject / PLC | Digital I/O card / **Modbus TCP** first; Profinet/EtherNet-IP/OPC-UA later | |
 | Packaging | PyInstaller / MSI for the line PC | Offline install |
@@ -106,6 +107,18 @@ Core entities (relational):
 - **Base** — classic OCV/OCR + code read & grade + compliance + batch/reports.
 - **+ AI** — DL-OCR, anomaly detection, retraining workflow.
 - **+ Serialization** — serial management, aggregation, L3/L4 reporting.
+
+## External integration (data egress)
+
+A configurable integration layer publishes scanned/inspection data to third-party
+applications over TCP/IP (D-014). It subscribes to the EventBus, so it is fully
+decoupled from the engine.
+
+- **Direction (per connector):** TCP **server** (peer connects to us) or TCP **client** (we connect out).
+- **Format:** line-framed JSON (default) or delimited/templated (for host systems).
+- **Delivery:** real-time push per inspection result; **store-and-forward** buffer + auto-reconnect.
+- **Compliance:** every message logged for audit; connector config is versioned/change-controlled.
+- Code in `src/vis/integrations/` (transport + formatter + publisher). Future: OPC-UA, Profinet, EtherNet/IP, MES/ERP.
 
 ## Non-functional requirements
 

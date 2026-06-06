@@ -4,6 +4,18 @@ Lightweight ADR-style record of decisions and their rationale. Newest at top. St
 
 ---
 
+## D-014 — External integration: TCP/IP result publishing to third-party apps
+**Date:** 2026-06-07 · **Status:** Accepted
+**Decision:** A configurable integration layer publishes scanned/inspection data to **any third-party application over TCP/IP**. Each connector is configurable as **TCP server** (peer connects to us) or **TCP client** (we connect to their host:port), with a configurable **message format** (line-framed JSON default + delimited/templated for host systems), pushing **per inspection result in real time**. **Store-and-forward buffering + auto-reconnect** so data survives peer downtime. Subscribes to the internal **EventBus** (decoupled from the engine). All egress logged for audit; connector config under change control.
+**Why:** User requirement — connect the app with any third-party app and pass scanned data. The EventBus was designed for exactly this.
+**Scope:** Phase 1 = generic TCP/IP push. Richer industrial protocols (OPC-UA, Profinet, EtherNet/IP) and MES/ERP remain later phases.
+
+## D-013 — Database: PostgreSQL (+ JSONB), via SQLAlchemy
+**Date:** 2026-06-07 · **Status:** Accepted
+**Decision:** PostgreSQL is the standard DB (line PC and future central/fleet). Use **JSONB** for variable fields (tool config, ISO-grade parameters) inside a relational schema. Access via **SQLAlchemy + Alembic** migrations. **Images on the filesystem** (path + checksum in DB), never blobs in DB. **Audit tables append-only enforced at the DB** (REVOKE UPDATE/DELETE from the app role). Partition high-volume result tables by time. SQLite for tests only.
+**Why:** Concurrent writers (engine + backend + HMI); ACID across a relationship-heavy model; DB-level append-only for Part 11; SQL reporting; JSONB covers document flexibility; scales to fleet; free + cross-platform (Mac/Windows dev parity).
+**MongoDB considered & declined:** flexible schema is a GxP/validation *liability*; relational integrity, cross-document ACID, and SQL reporting matter more; Postgres JSONB covers Mongo's one real edge. SQLAlchemy keeps a customer-mandated **SQL Server** swap a config change, not a rewrite.
+
 ## D-012 — Code grading: inline "process-control grade" + certified verifier for sampling
 **Date:** 2026-06-07 · **Status:** Accepted (confirmed by user 2026-06-07)
 **Finding (verified):** A *certified* ISO 15415/15416 grade requires conformant verifier hardware per ISO/IEC 15426-1/-2 (calibration, certified test cards, matched aperture). Software/inline camera cannot produce a certified grade — only an approximate one. OSS Python libs decode only.

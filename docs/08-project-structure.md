@@ -29,11 +29,15 @@ src/vis/
 │   └── pipeline.py  # frame -> crop -> pool -> aggregate -> publish results/rejects
 ├── models/
 │   └── registry.py  # ModelRegistry — locked, hashed, versioned models (D-007)
+├── security/        # auth + RBAC (Part 11 access control)
+│   ├── passwords.py # PBKDF2-HMAC-SHA256 hashing + PasswordPolicy (stdlib, no native deps)
+│   └── authz.py     # permission codes, default roles, require()/has_permission()
 ├── db/              # persistence + audit (docs/09, D-013)
 │   ├── base.py      # engine/session factory, Base, JSONType (JSONB on PG)
 │   ├── models.py    # ORM models (users, recipes, batches, results, audit, ...)
 │   ├── audit.py     # AuditService — append-only, hash-chained, tamper-evident
-│   └── store.py     # ResultStore (persist results) + RecipeRepository (versioned + audited)
+│   ├── users.py     # UserService — create/authenticate (lockout) + verify_user (e-sign re-auth)
+│   └── store.py     # ResultStore (persist results) + RecipeRepository (RBAC + e-sign + audited)
 └── cli.py           # demo recipes + runnable entrypoint (--source, --tcp-server, --db)
 alembic/             # PostgreSQL migration scaffolding (env.py wired to Base.metadata)
 tests/
@@ -43,7 +47,8 @@ tests/
 ├── test_code_verify.py # real QR decode + verify + grade
 ├── test_sim.py         # simulated code line, multi-product
 ├── test_audit.py       # audit hash-chain validity + tamper detection
-└── test_persistence.py # results persisted; recipe save/approve audited
+├── test_persistence.py # results persisted; recipe save/approve audited + RBAC-gated
+└── test_auth.py        # password hashing/policy, authenticate, lockout, permissions
 ```
 
 ## The seams (where real implementations drop in)

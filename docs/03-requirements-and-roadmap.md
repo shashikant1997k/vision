@@ -35,9 +35,9 @@ The must-ship core that makes us credible and deployable on a real pharma line.
 - [ ] **TCP/IP result publishing to third-party apps** — configurable TCP server/client, JSON or delimited format, real-time push per result, store-and-forward + auto-reconnect (D-014).
 
 ### Compliance (non-negotiable, day one)
-- [ ] RBAC (roles + rights), secure login, password policy, idle logout.
-- [ ] **Read-only, no-delete, time-stamped audit trail** (who/what/when, old→new).
-- [ ] **Two-component electronic signatures** on recipe approval + batch release.
+- [x] RBAC (roles + rights), secure login, password policy — *done (lockout incl.); idle logout still TODO*.
+- [x] **Read-only, no-delete, time-stamped audit trail** (who/what/when, old→new) — *done: hash-chained + tamper-evident*.
+- [x] **Two-component electronic signatures** on recipe approval — *done (identity + password re-entry); batch release TODO*.
 - [ ] Data integrity (ALCOA+); image archival policy & retention.
 
 ### Batch & reporting

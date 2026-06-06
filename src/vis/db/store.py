@@ -3,6 +3,7 @@ from __future__ import annotations
 from sqlalchemy import func, select
 
 from ..domain.entities import Recipe as DomainRecipe
+from ..security.authz import Perm, require
 from .audit import AuditService
 from .models import (
     CodeReadRow,
@@ -104,6 +105,7 @@ class RecipeRepository:
 
     def save_draft(self, domain_recipe: DomainRecipe, user_id: int | None = None) -> int:
         with self._sf() as s:
+            require(s, user_id, Perm.RECIPE_CREATE)
             audit = AuditService(s)
             product = self._get_or_create_product(
                 s, code=domain_recipe.recipe_id, name=domain_recipe.product
@@ -160,8 +162,17 @@ class RecipeRepository:
             s.commit()
             return recipe.id
 
-    def approve(self, recipe_id: int, user_id: int | None, meaning: str = "Approved") -> None:
+    def approve(
+        self, recipe_id: int, user_id: int, password: str, meaning: str = "Approved"
+    ) -> None:
+        """Approve a recipe. Requires the recipe.approve permission AND password
+        re-entry (the two-component electronic-signature pattern, 21 CFR 11.200)."""
+        from .users import AuthError, verify_user
+
         with self._sf() as s:
+            require(s, user_id, Perm.RECIPE_APPROVE)
+            if not verify_user(s, user_id, password):
+                raise AuthError("electronic signature failed: invalid password")
             audit = AuditService(s)
             recipe = s.get(Recipe, recipe_id)
             if recipe is None:

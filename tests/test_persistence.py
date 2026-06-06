@@ -42,14 +42,42 @@ def test_pipeline_results_persisted_with_codereads_and_grades(tmp_path):
 
 
 def test_recipe_save_and_approve_is_audited(tmp_path):
+    from vis.db.users import AuthError, UserService
+
     sf = _sf(tmp_path)
+    users = UserService(sf)
+    users.seed_roles()
+    eng_id = users.create_user("eng", "Secret123", roles=("engineer",))
+    qa_id = users.create_user("qa", "Secret123", roles=("qa_manager",))
+
     repo = RecipeRepository(sf)
-    recipe_id = repo.save_draft(build_code_demo_recipe(), user_id=None)
-    repo.approve(recipe_id, user_id=None, meaning="QA approved")
+    recipe_id = repo.save_draft(build_code_demo_recipe(), user_id=eng_id)
+
+    # engineer lacks recipe.approve
+    with pytest.raises(PermissionError):
+        repo.approve(recipe_id, user_id=eng_id, password="Secret123")
+    # wrong password blocks the e-signature
+    with pytest.raises(AuthError):
+        repo.approve(recipe_id, user_id=qa_id, password="WRONG")
+
+    repo.approve(recipe_id, user_id=qa_id, password="Secret123", meaning="QA approved")
 
     with sf() as s:
         recipe = s.get(Recipe, recipe_id)
         assert recipe.status == "approved"
+        assert recipe.approved_by == qa_id
         assert recipe.approved_signature_id is not None
         ok, _ = AuditService(s).verify_chain()
         assert ok
+
+
+def test_save_draft_requires_permission(tmp_path):
+    from vis.db.users import UserService
+
+    sf = _sf(tmp_path)
+    users = UserService(sf)
+    users.seed_roles()
+    op_id = users.create_user("op", "Secret123", roles=("operator",))  # no recipe.create
+    repo = RecipeRepository(sf)
+    with pytest.raises(PermissionError):
+        repo.save_draft(build_code_demo_recipe(), user_id=op_id)

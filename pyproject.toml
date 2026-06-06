@@ -1,0 +1,26 @@
+[project]
+name = "vision-inspection"
+version = "0.0.1"
+description = "Pharma inline print & code verification system"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = ["numpy>=1.24"]
+
+# Optional heavy deps are not needed for the walking skeleton.
+[project.optional-dependencies]
+engine = ["onnxruntime>=1.17", "opencv-python>=4.9", "pylibdmtx>=0.1.10"]
+camera = ["harvesters>=1.4"]      # GenICam/GigE acquisition (Windows; see D-011)
+dev = ["pytest>=8.0", "ruff>=0.4"]
+
+[project.scripts]
+vis-demo = "vis.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100

@@ -75,6 +75,18 @@ def test_calibration():
     assert Calibration.from_dict(cal.to_dict()).mm_per_pixel == pytest.approx(0.25)
 
 
+def test_load_image_from_file(tmp_path):
+    from PIL import Image
+
+    from vis.camera.file_source import load_image
+
+    arr = np.zeros((20, 30, 3), dtype=np.uint8)
+    arr[:, :, 0] = 255
+    Image.fromarray(arr).save(tmp_path / "p.png")
+    loaded = load_image(tmp_path / "p.png")
+    assert loaded.shape == (20, 30, 3) and loaded[0, 0, 0] == 255
+
+
 def test_harvester_camera_clear_error_without_driver():
     # harvesters is not installed in dev; opening must fail with a clear message.
     cam = HarvesterCamera("gige1", cti_path="/nonexistent/producer.cti")

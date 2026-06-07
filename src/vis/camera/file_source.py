@@ -17,6 +17,11 @@ def _load_image(path: Path) -> np.ndarray:
     return np.array(Image.open(path).convert("RGB"), dtype=np.uint8)
 
 
+def load_image(path) -> np.ndarray:
+    """Load a single image file (PNG/JPG/...) as an RGB uint8 numpy array."""
+    return _load_image(Path(path))
+
+
 class FileCamera(CameraDevice):
     """Replays images from a directory (sorted by name) as frames.
 

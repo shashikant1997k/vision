@@ -83,11 +83,13 @@ class MainWindow(QMainWindow):
         self._start = QPushButton("Start")
         self._stop = QPushButton("Stop")
         self._teach = QPushButton("Teach…")
+        self._teach_files = QPushButton("Teach on images…")
         self._settings = QPushButton("Settings…")
         self._stop.setEnabled(False)
         self._start.clicked.connect(self.start)
         self._stop.clicked.connect(self.stop)
         self._teach.clicked.connect(self.open_teach)
+        self._teach_files.clicked.connect(self.open_teach_from_files)
         self._settings.clicked.connect(self.open_settings)
 
         counters = QGridLayout()
@@ -102,6 +104,7 @@ class MainWindow(QMainWindow):
         buttons.addWidget(self._start)
         buttons.addWidget(self._stop)
         buttons.addWidget(self._teach)
+        buttons.addWidget(self._teach_files)
         buttons.addWidget(self._settings)
 
         recipe_row = QHBoxLayout()
@@ -266,7 +269,6 @@ class MainWindow(QMainWindow):
     def open_teach(self) -> None:
         """Acquire a set of product images from the line, then open Teach on them
         (pick the reference from the filmstrip and mark ROIs on a real product)."""
-        from .teach_window import TeachWindow
 
         images = []
         source = self._camera_factory(self._camera_id, None, self._recipe)
@@ -281,6 +283,37 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("Could not acquire reference images")
             return
         self.statusBar().showMessage(f"Acquired {len(images)} images for teaching")
+        self._open_teach_with_images(images)
+
+    def open_teach_from_files(self) -> None:
+        """Load product images from disk and teach on them (your own samples)."""
+        from PySide6.QtWidgets import QFileDialog
+
+        from ..camera.file_source import load_image
+
+        paths, _ = QFileDialog.getOpenFileNames(
+            self,
+            "Select product images to teach on",
+            "",
+            "Images (*.png *.jpg *.jpeg *.bmp *.tif *.tiff)",
+        )
+        if not paths:
+            return
+        images = []
+        for path in paths:
+            try:
+                images.append(load_image(path))
+            except Exception:
+                pass
+        if not images:
+            self.statusBar().showMessage("Could not load the selected images")
+            return
+        self.statusBar().showMessage(f"Loaded {len(images)} image(s) for teaching")
+        self._open_teach_with_images(images)
+
+    def _open_teach_with_images(self, images) -> None:
+        from .teach_window import TeachWindow
+
         lanes = sorted({region.reject_output for region in self._recipe.regions})
         self._teach_window = TeachWindow(
             user_id=self._user_id,

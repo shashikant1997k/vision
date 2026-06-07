@@ -42,6 +42,8 @@ def main() -> int:
         username=login.username,
         recipe=build_code_demo_recipe(),
         camera_factory=_sim_factory,
+        session_factory=make_session_factory(engine),
+        user_id=login.user_id,
     )
     window.resize(1000, 560)
     window.show()

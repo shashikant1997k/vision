@@ -24,12 +24,25 @@ class MainWindow(QMainWindow):
     UI polls LiveView/LiveStats on a timer (it never blocks on the pipeline).
     """
 
-    def __init__(self, *, username, recipe, camera_factory, camera_id="cam1", parent=None) -> None:
+    def __init__(
+        self,
+        *,
+        username,
+        recipe,
+        camera_factory,
+        camera_id="cam1",
+        session_factory=None,
+        user_id=None,
+        parent=None,
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Vision Inspection — Live")
         self._recipe = recipe
         self._camera_factory = camera_factory
         self._camera_id = camera_id
+        self._sf = session_factory
+        self._user_id = user_id
+        self._teach_window = None
         self._runner: InspectionRunner | None = None
         self._stats = LiveStats()
         self._live = LiveView()
@@ -47,9 +60,11 @@ class MainWindow(QMainWindow):
 
         self._start = QPushButton("Start")
         self._stop = QPushButton("Stop")
+        self._teach = QPushButton("Teach…")
         self._stop.setEnabled(False)
         self._start.clicked.connect(self.start)
         self._stop.clicked.connect(self.stop)
+        self._teach.clicked.connect(self.open_teach)
 
         counters = QGridLayout()
         counters.addWidget(QLabel("Total"), 0, 0)
@@ -62,6 +77,7 @@ class MainWindow(QMainWindow):
         buttons = QHBoxLayout()
         buttons.addWidget(self._start)
         buttons.addWidget(self._stop)
+        buttons.addWidget(self._teach)
 
         side = QVBoxLayout()
         side.addLayout(counters)
@@ -114,6 +130,28 @@ class MainWindow(QMainWindow):
         self._start.setEnabled(True)
         self._stop.setEnabled(False)
         self.statusBar().showMessage("Stopped")
+
+    def open_teach(self) -> None:
+        """Grab a reference frame and open the teach screen on it."""
+        from .teach_window import TeachWindow
+
+        source = self._camera_factory(self._camera_id, None, self._recipe)
+        frame = next(source.frames(), None)
+        close = getattr(source, "close", None)
+        if callable(close):
+            close()
+        if frame is None:
+            self.statusBar().showMessage("Could not grab a reference frame")
+            return
+        lanes = sorted({region.reject_output for region in self._recipe.regions})
+        self._teach_window = TeachWindow(
+            user_id=self._user_id,
+            reference_image=frame.image,
+            session_factory=self._sf,
+            reject_lanes=lanes,
+        )
+        self._teach_window.resize(960, 540)
+        self._teach_window.show()
 
     def _refresh(self) -> None:
         latest = self._live.latest(self._camera_id)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 
 import numpy as np
@@ -41,7 +42,9 @@ def worker_init() -> None:
 
 
 def run_tool_task(task: ToolTask) -> ToolOutcome:
-    key = (task.tool_type, task.tool_id)
+    # Key on config too: the same tool_id can carry different config across recipe
+    # versions / teach edits, and reusing a stale instance would be wrong.
+    key = (task.tool_type, task.tool_id, json.dumps(task.config, sort_keys=True, default=str))
     tool = _TOOL_CACHE.get(key)
     if tool is None:
         tool = build_tool(task.tool_type, task.tool_id, task.config)

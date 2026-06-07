@@ -7,7 +7,7 @@
 """
 
 from .live_view import LiveView
-from .overlay import draw_overlay
+from .overlay import draw_layout, draw_overlay
 from .reject import RecordingRejectHandler, RejectHandler
 from .runner import InspectionRunner
 from .stats import LiveStats
@@ -18,5 +18,6 @@ __all__ = [
     "LiveView",
     "RecordingRejectHandler",
     "RejectHandler",
+    "draw_layout",
     "draw_overlay",
 ]

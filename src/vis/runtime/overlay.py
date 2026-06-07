@@ -11,6 +11,7 @@ import numpy as np
 
 GREEN = (0, 170, 0)
 RED = (220, 30, 30)
+BLUE = (40, 120, 255)
 
 _FONT_PATHS = [
     "/System/Library/Fonts/Supplemental/Arial.ttf",
@@ -45,6 +46,25 @@ def _label(draw, xy, text, color, font):
     except Exception:
         pass
     draw.text((x, y), text, fill=color, font=font)
+
+
+def draw_layout(image: np.ndarray, recipe) -> np.ndarray:
+    """Draw region/tool ROIs (no results) in blue — for the teach preview."""
+    from PIL import Image, ImageDraw
+
+    img = Image.fromarray(np.ascontiguousarray(image)).convert("RGB")
+    draw = ImageDraw.Draw(img)
+    font = _font(16)
+    for region in recipe.regions:
+        rx, ry, rw, rh = region.roi.x, region.roi.y, region.roi.w, region.roi.h
+        draw.rectangle([rx, ry, rx + rw - 1, ry + rh - 1], outline=BLUE, width=2)
+        _label(draw, (rx + 4, ry + 4), region.name, BLUE, font)
+        for tool in region.tools:
+            ax, ay = rx + tool.roi.x, ry + tool.roi.y
+            draw.rectangle([ax, ay, ax + tool.roi.w - 1, ay + tool.roi.h - 1], outline=BLUE, width=1)
+            ty = ay - 18 if ay >= 18 else ay + 2
+            _label(draw, (ax + 2, ty), f"{tool.tool_id}:{tool.tool_type}", BLUE, font)
+    return np.array(img, dtype=np.uint8)
 
 
 def draw_overlay(image: np.ndarray, recipe, results) -> np.ndarray:

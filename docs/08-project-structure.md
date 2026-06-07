@@ -64,7 +64,9 @@ src/vis/
 │   └── archive.py   # FrameArchiver — image-retention policy → FrameCapture rows
 ├── hmi/             # Qt desktop HMI — the line operator UI (PySide6, D-015)
 │   ├── login.py     # LoginDialog (authenticates via UserService)
-│   ├── main_window.py # MainWindow — live view (annotated feed + counters + start/stop)
+│   ├── main_window.py # MainWindow — live view (annotated feed + counters + start/stop + Teach…)
+│   ├── teach_model.py # TeachModel — pure recipe-build/test logic (no Qt)
+│   ├── teach_window.py # TeachWindow — define regions/tools, test, save draft recipe
 │   ├── image.py     # numpy frame -> QPixmap
 │   └── app.py       # entry point (vis-hmi)
 ├── reporting/
@@ -90,7 +92,8 @@ tests/
 ├── test_batch.py       # batch start/close, results→batch, signed report, audit
 ├── test_stations.py    # camera-settings + reject-output config persistence, RBAC, audit
 ├── test_assembler.py   # load-station-run-batch: results→batch, camera assignment, frame archive
-└── test_hmi.py         # HMI smoke (offscreen): image conv, login, live-view counts
+├── test_hmi.py         # HMI smoke (offscreen): image conv, login, live-view counts
+└── test_teach.py       # teach model build/test/save + teach window smoke
 ```
 
 ## The seams (where real implementations drop in)

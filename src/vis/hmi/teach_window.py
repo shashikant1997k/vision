@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -363,16 +364,42 @@ class TeachWindow(QMainWindow):
         return len(self._model.regions) - 1
 
     # ---- tree -------------------------------------------------------------
+    def _result_maps(self):
+        """Build {region_id: passed} and {(region_id, tool_id): ToolResult} from
+        the last Test (empty if not tested / edited since)."""
+        region_pass: dict = {}
+        tool_result: dict = {}
+        for r in self._last_results or []:
+            region_pass[r.region_id] = r.passed
+            for tr in r.tool_results:
+                tool_result[(r.region_id, tr.tool_id)] = tr
+        return region_pass, tool_result
+
     def _rebuild_tree(self) -> None:
+        green = QBrush(QColor(0, 140, 0))
+        red = QBrush(QColor(200, 0, 0))
+        region_pass, tool_result = self._result_maps()
         self._tree.blockSignals(True)
         self._tree.clear()
         for r, region in enumerate(self._model.regions):
-            parent = QTreeWidgetItem([f"{region.name}  →  {region.reject_output}"])
+            label = f"{region.name}  →  {region.reject_output}"
+            if region.region_id in region_pass:
+                label += "   " + ("✓ PASS" if region_pass[region.region_id] else "✗ REJECT")
+            parent = QTreeWidgetItem([label])
             parent.setData(0, Qt.UserRole, ("region", r))
+            if region.region_id in region_pass:
+                parent.setForeground(0, green if region_pass[region.region_id] else red)
             for t, tool in enumerate(region.tools):
                 friendly = _FRIENDLY.get(tool.tool_type, tool.tool_type)
-                child = QTreeWidgetItem([f"{tool.tool_id} · {friendly}"])
+                tlabel = f"{tool.tool_id} · {friendly}"
+                res = tool_result.get((region.region_id, tool.tool_id))
+                if res is not None:
+                    read = _disp(res.measured_value) or "(no read)"
+                    tlabel += f"   {'✓' if res.passed else '✗'}  read “{read[:24]}”"
+                child = QTreeWidgetItem([tlabel])
                 child.setData(0, Qt.UserRole, ("tool", r, t))
+                if res is not None:
+                    child.setForeground(0, green if res.passed else red)
                 parent.addChild(child)
             self._tree.addTopLevelItem(parent)
         self._tree.expandAll()
@@ -509,21 +536,46 @@ class TeachWindow(QMainWindow):
         base = self._teach_image()
         if self._last_results is not None:
             image = draw_overlay(base, self._model.to_recipe(), self._last_results)
+            self._image.setImage(image)
+            self._image.set_selected_roi(None)  # show results cleanly, no handles
         else:
             image = draw_layout(base, self._model.to_recipe())
-        self._image.setImage(image)
-        # selection handles (off while armed to draw a new box)
-        self._image.set_selected_roi(None if self._pending else self._selected_abs_roi())
+            self._image.setImage(image)
+            self._image.set_selected_roi(None if self._pending else self._selected_abs_roi())
 
     def _set_guide(self, text: str) -> None:
         self._guide.setText(text)
 
     # ---- actions ----------------------------------------------------------
     def _test(self) -> None:
+        if not any(region.tools for region in self._model.regions):
+            self._status.setText("Add at least one inspection (Read Code / Read Text) first.")
+            return
         self._last_results = self._model.test(self._reference)
+        self._rebuild_tree()  # annotate the inspection plan with ✓/✗ + read values
         self._refresh_view()
-        passed = sum(1 for r in self._last_results if r.passed)
-        self._status.setText(f"Test: {passed}/{len(self._last_results)} products passed")
+        self._status.setText(self._results_summary())
+
+    def _results_summary(self) -> str:
+        products = self._last_results or []
+        n_pass = sum(1 for r in products if r.passed)
+        verdict = "PASS" if products and n_pass == len(products) else "REJECT"
+        lines = [f"Result: {verdict}   ({n_pass}/{len(products)} products passed)"]
+        for r in products:
+            for tr in r.tool_results:
+                mark = "✓" if tr.passed else "✗"
+                read = _disp(tr.measured_value) or "(nothing read)"
+                detail = ""
+                if not tr.passed:
+                    info = tr.detail or {}
+                    if info.get("reason") == "no_decode":
+                        detail = " — code did not scan"
+                    elif tr.expected_value:
+                        detail = f" — expected {_disp(tr.expected_value)!r}"
+                    else:
+                        detail = " — not matched"
+                lines.append(f"   {mark} {tr.tool_id}: read “{read[:30]}”{detail}")
+        return "\n".join(lines)
 
     def _save(self) -> None:
         if self._sf is None:
@@ -563,3 +615,10 @@ class TeachWindow(QMainWindow):
             return
         self._status.setText(f"Recipe #{self._saved_recipe_id} approved")
         self._approve_btn.setEnabled(False)
+
+
+def _disp(value) -> str:
+    """Readable string for display (control chars like the GS1 0x1d → <GS>)."""
+    if value is None:
+        return ""
+    return str(value).replace("\x1d", "<GS>")

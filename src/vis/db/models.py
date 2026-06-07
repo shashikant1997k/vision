@@ -243,3 +243,28 @@ class RejectOutputRow(Base):
     channel: Mapped[int] = mapped_column(Integer)
     eject_delay_ms: Mapped[int] = mapped_column(Integer, default=0)
     pulse_ms: Mapped[int] = mapped_column(Integer, default=100)
+
+
+class CameraAssignment(Base):
+    """Binds a camera to the recipe it runs for a batch (multi-camera run)."""
+
+    __tablename__ = "camera_assignments"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    batch_id: Mapped[int] = mapped_column(ForeignKey("batches.id"))
+    camera_id: Mapped[int] = mapped_column(ForeignKey("cameras.id"))
+    recipe_ref: Mapped[str] = mapped_column(String(64))  # recipe identifier
+    recipe_version: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[str] = mapped_column(String(40), default=_utcnow_iso)
+
+
+class FrameCapture(Base):
+    """One acquired frame's provenance + optional archived image path."""
+
+    __tablename__ = "frame_captures"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    batch_id: Mapped[int | None] = mapped_column(ForeignKey("batches.id"))
+    camera_id: Mapped[str] = mapped_column(String(64))  # camera_id string from the frame
+    frame_id: Mapped[int] = mapped_column(Integer)
+    image_ref: Mapped[str | None] = mapped_column(String(256))  # filesystem path, not a blob
+    passed: Mapped[bool] = mapped_column(Boolean)
+    created_at: Mapped[str] = mapped_column(String(40), default=_utcnow_iso)

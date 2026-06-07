@@ -16,6 +16,10 @@ class RejectHandler(ABC):
     @abstractmethod
     def reject(self, region_result) -> None: ...
 
+    def drain(self) -> None:
+        """Wait for any pending (delayed) ejects to fire. Default: no-op.
+        Called on graceful shutdown of a bounded run."""
+
 
 class RecordingRejectHandler(RejectHandler):
     """Records rejects in memory (placeholder for the digital-I/O ejector)."""

@@ -90,4 +90,6 @@ class InspectionRunner:
         """Start and run to completion (for bounded sources). Returns stats."""
         self.start()
         self.join()
+        if self.reject_handler is not None:
+            self.reject_handler.drain()  # flush pending (delayed) ejects
         return self.stats

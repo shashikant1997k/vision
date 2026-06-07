@@ -18,34 +18,42 @@ class RejectOutputConfig:
     pulse_ms: int = 100  # ejector on-time
 
 
-def _timer_scheduler(delay_s: float, fn: Callable[[], None]) -> None:
-    if delay_s <= 0:
-        fn()
-    else:
-        threading.Timer(delay_s, fn).start()
-
-
 class RejectController(RejectHandler):
     """Routes a rejected region to its lane's ejector.
 
     On a reject it waits the lane's eject delay (the time for the product to
     travel from the inspection point to the ejector) and then pulses the lane's
-    digital output. Multiple rejects can be in flight per lane. Encoder-based
-    timing (fire after N encoder counts) is a later extension of the scheduler.
+    digital output. Delayed ejects run on timers; `drain()` waits for any
+    in-flight ejects (called on graceful shutdown). Pass a custom `scheduler`
+    (e.g. immediate) for deterministic tests. Encoder-count timing is a later
+    extension of the scheduler.
     """
 
     def __init__(
         self,
         outputs,
         io: DigitalIO | None = None,
-        scheduler: Callable[[float, Callable[[], None]], None] = _timer_scheduler,
+        scheduler: Callable[[float, Callable[[], None]], None] | None = None,
     ) -> None:
         self._outputs = {o.name: o for o in outputs}
         self.io = io or SimulatedIO()
         self._scheduler = scheduler
         self._lock = threading.Lock()
+        self._timers: list[threading.Timer] = []
         self.fired = 0
         self.unmatched = 0
+
+    def _schedule(self, delay_s: float, fn: Callable[[], None]) -> None:
+        if self._scheduler is not None:
+            self._scheduler(delay_s, fn)
+            return
+        if delay_s <= 0:
+            fn()
+            return
+        timer = threading.Timer(delay_s, fn)
+        with self._lock:
+            self._timers.append(timer)
+        timer.start()
 
     def reject(self, region_result) -> None:
         cfg = self._outputs.get(region_result.reject_output)
@@ -59,7 +67,15 @@ class RejectController(RejectHandler):
             with self._lock:
                 self.fired += 1
 
-        self._scheduler(cfg.eject_delay_ms / 1000.0, fire)
+        self._schedule(cfg.eject_delay_ms / 1000.0, fire)
+
+    def drain(self, timeout: float = 2.0) -> None:
+        with self._lock:
+            timers = list(self._timers)
+            self._timers = []
+        for timer in timers:
+            timer.join(timeout)
 
     def close(self) -> None:
+        self.drain()
         self.io.close()

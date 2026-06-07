@@ -38,7 +38,7 @@ The must-ship core that makes us credible and deployable on a real pharma line.
 - [x] RBAC (roles + rights), secure login, password policy — *done (lockout incl.); idle logout still TODO*.
 - [x] **Read-only, no-delete, time-stamped audit trail** (who/what/when, old→new) — *done: hash-chained + tamper-evident*.
 - [x] **Two-component electronic signatures** on recipe approval — *done (identity + password re-entry); batch release TODO*.
-- [ ] Data integrity (ALCOA+); image archival policy & retention.
+- [x] Image archival policy (all/fails/none) → FrameCapture rows + filesystem images — *done (FrameArchiver); retention/purge rules pending*. Broader ALCOA+ data-integrity review pending.
 
 ### Batch & reporting
 - [x] Batch create / start / close (release e-signature); variable data per batch — *done; pause/resume TODO*.

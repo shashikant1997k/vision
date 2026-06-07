@@ -56,7 +56,9 @@ src/vis/
 │   ├── stats.py     # LiveStats — thread-safe per-camera + total counters
 │   ├── live_view.py # LiveView — latest frame + results per camera (for the HMI)
 │   ├── overlay.py   # draw_overlay — annotate frame with ROI boxes + results (HMI view)
-│   └── reject.py    # RejectHandler — reject routing / ejector I/O seam
+│   ├── reject.py    # RejectHandler — reject routing / ejector I/O seam
+│   ├── assembler.py # RuntimeAssembler — build a live runner from persisted station config
+│   └── archive.py   # FrameArchiver — image-retention policy → FrameCapture rows
 ├── reporting/
 │   └── batch_report.py # compute_summary + CSV export + signed HTML batch report
 └── cli.py           # demo recipes + runnable entrypoint (--source, --tcp-server, --db)
@@ -76,7 +78,8 @@ tests/
 ├── test_persistence.py # results persisted; recipe save/approve audited + RBAC-gated
 ├── test_auth.py        # password hashing/policy, authenticate, lockout, permissions
 ├── test_batch.py       # batch start/close, results→batch, signed report, audit
-└── test_stations.py    # camera-settings + reject-output config persistence, RBAC, audit
+├── test_stations.py    # camera-settings + reject-output config persistence, RBAC, audit
+└── test_assembler.py   # load-station-run-batch: results→batch, camera assignment, frame archive
 ```
 
 ## The seams (where real implementations drop in)

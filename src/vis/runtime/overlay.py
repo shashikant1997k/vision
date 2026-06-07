@@ -48,8 +48,13 @@ def _label(draw, xy, text, color, font):
     draw.text((x, y), text, fill=color, font=font)
 
 
-def draw_layout(image: np.ndarray, recipe) -> np.ndarray:
-    """Draw region/tool ROIs (no results) in blue — for the teach preview."""
+_FRIENDLY = {"code_verify": "Read Code", "ocv_text": "Read Text", "ocv_stub": "Read Text"}
+YELLOW = (255, 200, 0)
+
+
+def draw_layout(image: np.ndarray, recipe, highlight=None) -> np.ndarray:
+    """Draw region/tool ROIs (no results) for the teach preview. `highlight` is
+    an absolute (x, y, w, h) box drawn thick yellow to mark the selected item."""
     from PIL import Image, ImageDraw
 
     img = Image.fromarray(np.ascontiguousarray(image)).convert("RGB")
@@ -63,7 +68,11 @@ def draw_layout(image: np.ndarray, recipe) -> np.ndarray:
             ax, ay = rx + tool.roi.x, ry + tool.roi.y
             draw.rectangle([ax, ay, ax + tool.roi.w - 1, ay + tool.roi.h - 1], outline=BLUE, width=1)
             ty = ay - 18 if ay >= 18 else ay + 2
-            _label(draw, (ax + 2, ty), f"{tool.tool_id}:{tool.tool_type}", BLUE, font)
+            friendly = _FRIENDLY.get(tool.tool_type, tool.tool_type)
+            _label(draw, (ax + 2, ty), f"{tool.tool_id} · {friendly}", BLUE, font)
+    if highlight is not None:
+        hx, hy, hw, hh = highlight
+        draw.rectangle([hx - 1, hy - 1, hx + hw, hy + hh], outline=YELLOW, width=3)
     return np.array(img, dtype=np.uint8)
 
 

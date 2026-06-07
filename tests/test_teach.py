@@ -111,94 +111,70 @@ def test_approve_dialog_collects_values():
     assert dlg.password_value == "pw" and dlg.meaning_value == "released"
 
 
-def test_teach_on_roi_fills_region_and_tool_fields(tmp_path):
+def _teach_window(sf, user_id):
+    from vis.hmi.teach_window import TeachWindow
+
+    return TeachWindow(
+        user_id=user_id, reference_image=_reference_frame().image,
+        session_factory=sf, reject_lanes=["lane1", "lane2"],
+    )
+
+
+def test_teach_starts_with_a_default_product():
+    pytest.importorskip("PySide6")
+    _qapp()
+    win = _teach_window(None, 1)
+    assert len(win._model.regions) == 1  # full-frame product ready to use
+
+
+def test_teach_add_inspection_by_drawing(tmp_path):
     pytest.importorskip("PySide6")
     _qapp()
     sf, qa_id = _qa_setup(tmp_path)
-    from vis.hmi.teach_window import TeachWindow
+    win = _teach_window(sf, qa_id)
 
-    win = TeachWindow(
-        user_id=qa_id, reference_image=_reference_frame().image,
-        session_factory=sf, reject_lanes=["lane1", "lane2"],
-    )
-    win._draw_target.setCurrentText("Region")
-    win._on_roi(400, 0, 360, 480)
-    assert (win._rx.value(), win._rw.value()) == (400, 360)
+    win._arm_tool("code_verify")           # pick "Read Code" from the palette
+    win._on_roi_drawn(30, 30, 300, 300)    # draw its box on the image
 
-    win._region_name.setText("P2")
-    win._add_region()
-    win._draw_target.setCurrentText("Tool")
-    win._on_roi(430, 30, 300, 300)  # absolute; region origin (400,0) -> relative (30,30)
-    assert (win._tx.value(), win._ty.value()) == (30, 30)
+    tools = win._model.regions[0].tools
+    assert len(tools) == 1
+    assert tools[0].tool_type == "code_verify"
+    assert (tools[0].roi.w, tools[0].roi.h) == (300, 300)
+    assert win._selected == ("tool", 0, 0)  # the new inspection is selected
 
 
-def test_teach_save_then_approve(tmp_path):
+def test_teach_delete_inspection(tmp_path):
+    pytest.importorskip("PySide6")
+    _qapp()
+    sf, qa_id = _qa_setup(tmp_path)
+    win = _teach_window(sf, qa_id)
+    win._arm_tool("code_verify")
+    win._on_roi_drawn(30, 30, 300, 300)
+    win._selected = ("tool", 0, 0)
+    win._delete_selected()
+    assert win._model.regions[0].tools == []
+
+
+def test_teach_draw_test_save_approve(tmp_path):
     pytest.importorskip("PySide6")
     _qapp()
     sf, qa_id = _qa_setup(tmp_path)
     from vis.db.models import Recipe as RecipeRow
     from vis.db.store import RecipeRepository
-    from vis.hmi.teach_window import TeachWindow
 
-    win = TeachWindow(
-        user_id=qa_id, reference_image=_reference_frame().image,
-        session_factory=sf, reject_lanes=["lane1", "lane2"],
-    )
-    win._rw.setValue(360)
-    win._rh.setValue(480)
-    win._add_region()
-    win._tool_type.setCurrentText("code_verify")
-    win._tx.setValue(30)
-    win._ty.setValue(30)
-    win._tw.setValue(300)
-    win._th.setValue(300)
-    win._expected.setText(_gs1("SN0001"))
-    win._add_tool()
-    win._save()
-    assert win._saved_recipe_id is not None and win._approve_btn.isEnabled()
-
-    # the approve dialog is modal; exercise the underlying approval directly
-    RecipeRepository(sf).approve(win._saved_recipe_id, qa_id, "Secret123", "released")
-    with sf() as s:
-        assert s.get(RecipeRow, win._saved_recipe_id).status == "approved"
-
-
-def test_teach_window_smoke(tmp_path):
-    pytest.importorskip("PySide6")
-    from PySide6.QtWidgets import QApplication
-
-    from vis.db.base import init_db, make_engine, make_session_factory
-    from vis.db.users import UserService
-    from vis.hmi.teach_window import TeachWindow
-
-    QApplication.instance() or QApplication([])
-    engine = make_engine(f"sqlite:///{tmp_path}/t.db")
-    init_db(engine)
-    sf = make_session_factory(engine)
-    users = UserService(sf)
-    users.seed_roles()
-    eng_id = users.create_user("eng", "Secret123", roles=("engineer",))
-
-    win = TeachWindow(
-        user_id=eng_id,
-        reference_image=_reference_frame().image,
-        session_factory=sf,
-        reject_lanes=["lane1", "lane2"],
-    )
-    win._region_name.setText("Product 1")
-    win._rw.setValue(360)
-    win._rh.setValue(480)
-    win._add_region()
-
-    win._tool_type.setCurrentText("code_verify")
-    win._tx.setValue(30)
-    win._ty.setValue(30)
-    win._tw.setValue(300)
-    win._th.setValue(300)
-    win._expected.setText(_gs1("SN0001"))
-    win._add_tool()
+    win = _teach_window(sf, qa_id)
+    win._arm_tool("code_verify")
+    win._on_roi_drawn(30, 30, 300, 300)
+    win._t_expected.setText(_gs1("SN0001"))  # edit in the properties panel
+    assert win._model.regions[0].tools[0].config.get("expected_data") == _gs1("SN0001")
 
     win._test()
     assert "passed" in win._status.text()
+    win._save()
+    assert win._saved_recipe_id is not None and win._approve_btn.isEnabled()
+
+    RecipeRepository(sf).approve(win._saved_recipe_id, qa_id, "Secret123", "released")
+    with sf() as s:
+        assert s.get(RecipeRow, win._saved_recipe_id).status == "approved"
     win._save()
     assert "Saved draft" in win._status.text()

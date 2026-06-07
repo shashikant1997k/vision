@@ -11,6 +11,21 @@ from ..engine.pipeline import InspectionPipeline
 from ..engine.pool import SyncPool
 
 
+# Inspection types shown in the teach palette (plain language ↔ internal type).
+INSPECTION_TYPES = [
+    {
+        "key": "code_verify",
+        "label": "Read Code (1D/2D / GS1)",
+        "expected_label": "Expected code data (blank = accept any readable code)",
+    },
+    {
+        "key": "ocv_text",
+        "label": "Read Text (OCR)",
+        "expected_label": "Expected text, e.g. LOT42",
+    },
+]
+
+
 def tool_config(tool_type: str, expected: str) -> dict:
     """Build a tool config from a single 'expected' value, per tool type."""
     if tool_type == "code_verify":
@@ -18,6 +33,15 @@ def tool_config(tool_type: str, expected: str) -> dict:
     if tool_type == "ocv_text":
         return {"expected": expected, "uppercase": True}
     return {}
+
+
+def expected_of(tool_type: str, config: dict) -> str:
+    """Inverse of tool_config: the single 'expected' value from a config."""
+    if tool_type == "code_verify":
+        return config.get("expected_data", "") or ""
+    if tool_type == "ocv_text":
+        return config.get("expected", "") or ""
+    return ""
 
 
 class TeachModel:
@@ -33,8 +57,15 @@ class TeachModel:
 
     def add_tool(
         self, region_index: int, tool_id: str, tool_type: str, roi: ROI, config: dict | None = None
-    ) -> None:
+    ) -> int:
         self.regions[region_index].tools.append(ToolSpec(tool_id, tool_type, roi, config or {}))
+        return len(self.regions[region_index].tools) - 1
+
+    def remove_region(self, region_index: int) -> None:
+        del self.regions[region_index]
+
+    def remove_tool(self, region_index: int, tool_index: int) -> None:
+        del self.regions[region_index].tools[tool_index]
 
     def to_recipe(self) -> Recipe:
         return Recipe(self.recipe_id, self.product, 1, list(self.regions))

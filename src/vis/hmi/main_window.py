@@ -61,10 +61,12 @@ class MainWindow(QMainWindow):
         self._start = QPushButton("Start")
         self._stop = QPushButton("Stop")
         self._teach = QPushButton("Teach…")
+        self._settings = QPushButton("Settings…")
         self._stop.setEnabled(False)
         self._start.clicked.connect(self.start)
         self._stop.clicked.connect(self.stop)
         self._teach.clicked.connect(self.open_teach)
+        self._settings.clicked.connect(self.open_settings)
 
         counters = QGridLayout()
         counters.addWidget(QLabel("Total"), 0, 0)
@@ -78,6 +80,7 @@ class MainWindow(QMainWindow):
         buttons.addWidget(self._start)
         buttons.addWidget(self._stop)
         buttons.addWidget(self._teach)
+        buttons.addWidget(self._settings)
 
         side = QVBoxLayout()
         side.addLayout(counters)
@@ -152,6 +155,27 @@ class MainWindow(QMainWindow):
         )
         self._teach_window.resize(960, 540)
         self._teach_window.show()
+
+    def open_settings(self) -> None:
+        """Open the camera-settings screen with a live preview from the source."""
+        from .settings_window import CameraSettingsWindow
+
+        source = self._camera_factory(self._camera_id, None, self._recipe)
+        state = {"gen": source.frames()}
+
+        def provider():
+            frame = next(state["gen"], None)
+            if frame is None:
+                state["gen"] = self._camera_factory(self._camera_id, None, self._recipe).frames()
+                frame = next(state["gen"], None)
+            return frame.image if frame is not None else None
+
+        self._settings_window = CameraSettingsWindow(
+            image_provider=provider,
+            apply_callback=getattr(source, "apply_settings", None),
+        )
+        self._settings_window.resize(900, 480)
+        self._settings_window.show()
 
     def _refresh(self) -> None:
         latest = self._live.latest(self._camera_id)

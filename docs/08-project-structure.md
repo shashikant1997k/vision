@@ -69,6 +69,7 @@ src/vis/
 │   ├── teach_window.py # TeachWindow — drag-to-draw ROIs, configure tools, test, save, approve
 │   ├── roi_label.py  # ImageRoiLabel — drag a rectangle → ROI in image coords
 │   ├── approve_dialog.py # ApproveDialog — password + meaning for e-signature approval
+│   ├── settings_window.py # CameraSettingsWindow — exposure/gain/trigger + focus-assist + calibration
 │   ├── image.py     # numpy frame -> QPixmap
 │   └── app.py       # entry point (vis-hmi)
 ├── reporting/
@@ -95,7 +96,8 @@ tests/
 ├── test_stations.py    # camera-settings + reject-output config persistence, RBAC, audit
 ├── test_assembler.py   # load-station-run-batch: results→batch, camera assignment, frame archive
 ├── test_hmi.py         # HMI smoke (offscreen): image conv, login, live-view counts
-└── test_teach.py       # teach model build/test/save + teach window smoke
+├── test_teach.py       # teach model build/test/save + teach window smoke
+└── test_settings_screen.py # camera settings form, focus readout, calibration, save
 ```
 
 ## The seams (where real implementations drop in)

@@ -170,21 +170,37 @@ class MainWindow(QMainWindow):
             return
         self._recipe, recipe_db_id = self._resolve_recipe()
         bus = EventBus()
+        batch_no = self._batch_no.text().strip()
+        variable_data: dict = {}
 
-        # start a batch if a saved recipe + batch number + DB are available
-        if self._sf is not None and recipe_db_id is not None and self._batch_no.text().strip():
-            from ..db.batches import BatchService
-            from ..db.store import ResultStore
+        if self._sf is not None and recipe_db_id is not None:
+            from ..runtime.resolve import required_batch_fields, resolve_batch_fields
 
-            try:
-                self._batch_id = BatchService(self._sf).start(
-                    recipe_db_id, self._batch_no.text().strip(), self._user_id
-                )
-            except Exception as exc:
-                self.statusBar().showMessage(f"Batch start failed: {exc}")
-                return
-            bus.subscribe("inspection.result", ResultStore(self._sf, batch_id=self._batch_id).on_result)
-            self._close_batch.setEnabled(True)
+            fields = required_batch_fields(self._recipe)
+            if fields:
+                # the recipe is fed values before every batch — collect them now
+                from .batch_data_dialog import BatchDataDialog
+
+                dialog = BatchDataDialog(batch_no, fields, self)
+                if dialog.exec() != QDialog.Accepted:
+                    return
+                batch_no = dialog.batch_no()
+                variable_data = dialog.values()
+                self._recipe = resolve_batch_fields(self._recipe, variable_data)
+
+            if batch_no:
+                from ..db.batches import BatchService
+                from ..db.store import ResultStore
+
+                try:
+                    self._batch_id = BatchService(self._sf).start(
+                        recipe_db_id, batch_no, self._user_id, variable_data=variable_data
+                    )
+                except Exception as exc:
+                    self.statusBar().showMessage(f"Batch start failed: {exc}")
+                    return
+                bus.subscribe("inspection.result", ResultStore(self._sf, batch_id=self._batch_id).on_result)
+                self._close_batch.setEnabled(True)
 
         source = self._camera_factory(self._camera_id, None, self._recipe)
         lanes = sorted({region.reject_output for region in self._recipe.regions})

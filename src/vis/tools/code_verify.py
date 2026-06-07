@@ -22,6 +22,9 @@ class CodeVerifyTool(InspectionTool):
     type = "code_verify"
 
     def inspect(self, roi_image) -> ToolResult:
+        from .transform import rotate_image
+
+        roi_image = rotate_image(roi_image, self.config.get("rotation", 0))
         decoded = decode_first(roi_image)
         grade = approximate_grade(roi_image, decoded.ok)
         detail: dict = {"symbology": decoded.symbology, "grade": grade}

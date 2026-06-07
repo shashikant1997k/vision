@@ -36,7 +36,22 @@ def test_match_mode_build_read_roundtrip():
     ]
     for tool_type, mode, value in cases:
         config = build_config(tool_type, mode, value)
-        assert read_config(tool_type, config) == (mode, value)
+        assert read_config(tool_type, config) == {
+            "mode": mode, "value": value, "rotation": 0, "field": ""
+        }
+
+
+def test_build_read_rotation_and_batch_field():
+    from vis.hmi.teach_model import build_config, read_config
+
+    rotated = build_config("ocv_text", "Fixed value", "LOT42", rotation=90)
+    assert rotated["rotation"] == 90
+    assert read_config("ocv_text", rotated)["rotation"] == 90
+
+    batch = build_config("ocv_text", "Matches batch field", "", field="lot")
+    assert batch == {"match": "batch_field", "field": "lot", "uppercase": True}
+    info = read_config("ocv_text", batch)
+    assert info["mode"] == "Matches batch field" and info["field"] == "lot"
 
 
 def test_teach_build_and_test_passes():
@@ -185,6 +200,22 @@ def test_teach_draw_after_deleting_all_products_does_not_crash(tmp_path):
     win._on_roi_drawn(30, 30, 300, 300)
     assert len(win._model.regions) == 1
     assert len(win._model.regions[0].tools) == 1
+
+
+def test_teach_batch_field_and_rotation(tmp_path):
+    pytest.importorskip("PySide6")
+    _qapp()
+    sf, qa_id = _qa_setup(tmp_path)
+    win = _teach_window(sf, qa_id)
+    win._arm_tool("ocv_text")
+    win._on_roi_drawn(10, 10, 80, 24)
+
+    win._t_mode.setCurrentText("Matches batch field")  # fed before every batch
+    config = win._model.regions[0].tools[0].config
+    assert config["match"] == "batch_field" and config["field"] == "lot"
+
+    win._t_rotation.setCurrentText("90°")  # sideways print
+    assert win._model.regions[0].tools[0].config.get("rotation") == 90
 
 
 def test_teach_variable_code_pattern(tmp_path):

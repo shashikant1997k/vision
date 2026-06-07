@@ -28,6 +28,16 @@ def test_ocr_mismatch_fails():
     assert result.measured_value == "LOT49"
 
 
+def test_ocr_reads_rotated_text():
+    import numpy as np
+
+    upright = _render_text("LOT42", 360, 90)
+    rotated = np.rot90(upright, 1)  # text now sideways in the image
+    # rotation=270 un-rotates the ROI before reading
+    tool = build_tool("ocv_text", "lot", {"expected": "LOT42", "uppercase": True, "rotation": 270})
+    assert tool.inspect(rotated).passed
+
+
 def test_ocr_regex_validates_date_format():
     tool = build_tool("ocv_text", "exp", {"match": "regex", "pattern": r"\d{4}/\d{2}"})
     assert tool.inspect(_img("2026/06")).passed

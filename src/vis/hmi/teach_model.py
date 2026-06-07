@@ -26,15 +26,28 @@ INSPECTION_TYPES = [
 ]
 
 
-# Match modes — how an inspection decides pass/fail. Supports both STATIC
-# (fixed value) and VARIABLE (any readable / pattern) codes and text.
+# Match modes — how an inspection decides pass/fail. Supports STATIC (fixed),
+# VARIABLE (any readable / pattern), and BATCH-FED (matches a value entered at
+# batch start) codes and text.
 FIXED = "Fixed value"
 ANY_CODE = "Any readable code"
 CONTAINS = "Contains text"
 PATTERN = "Matches pattern"
+BATCH_FIELD = "Matches batch field"
 
 CODE_MODES = [FIXED, ANY_CODE, PATTERN]
-TEXT_MODES = [FIXED, CONTAINS, PATTERN]
+TEXT_MODES = [FIXED, CONTAINS, PATTERN, BATCH_FIELD]
+
+ROTATIONS = [0, 90, 180, 270]
+
+# Batch fields entered before each batch (the "fed before every batch" values).
+BATCH_FIELDS = [
+    ("lot", "Batch / B.No"),
+    ("mfg", "MFG date"),
+    ("expiry", "Expiry date"),
+    ("mrp", "M.R.P"),
+]
+BATCH_FIELD_KEYS = [k for k, _ in BATCH_FIELDS]
 
 
 def modes_for(tool_type: str) -> list[str]:
@@ -44,6 +57,8 @@ def modes_for(tool_type: str) -> list[str]:
 def value_hint(tool_type: str, mode: str) -> str:
     if mode == ANY_CODE:
         return "(no value needed — passes if a code is read)"
+    if mode == BATCH_FIELD:
+        return "(value is entered at batch start — choose the field at right)"
     if mode == PATTERN:
         return r"regex, e.g. \d{4}/\d{2} for a date or [A-Z0-9]+ for a serial"
     if mode == CONTAINS:
@@ -53,36 +68,50 @@ def value_hint(tool_type: str, mode: str) -> str:
     return "exact text, e.g. LOT42"
 
 
-def build_config(tool_type: str, mode: str, value: str) -> dict:
-    """Build a tool config from a match mode + value (static or variable)."""
+def build_config(
+    tool_type: str, mode: str, value: str, rotation: int = 0, field: str = ""
+) -> dict:
+    """Build a tool config from a match mode + value (+ rotation, batch field)."""
     if tool_type == "code_verify":
         if mode == ANY_CODE:
-            return {"gs1": True}
-        if mode == PATTERN:
-            return {"gs1": True, "pattern": value}
-        return {"gs1": True, "expected_data": value}  # FIXED
-    # ocv_text
-    if mode == CONTAINS:
-        return {"match": "contains", "expected": value, "uppercase": True}
-    if mode == PATTERN:
-        return {"match": "regex", "pattern": value, "uppercase": True}
-    return {"match": "exact", "expected": value, "uppercase": True}  # FIXED
+            cfg = {"gs1": True}
+        elif mode == PATTERN:
+            cfg = {"gs1": True, "pattern": value}
+        else:
+            cfg = {"gs1": True, "expected_data": value}  # FIXED
+    elif mode == BATCH_FIELD:
+        cfg = {"match": "batch_field", "field": field, "uppercase": True}
+    elif mode == CONTAINS:
+        cfg = {"match": "contains", "expected": value, "uppercase": True}
+    elif mode == PATTERN:
+        cfg = {"match": "regex", "pattern": value, "uppercase": True}
+    else:
+        cfg = {"match": "exact", "expected": value, "uppercase": True}  # FIXED
+    if rotation:
+        cfg["rotation"] = int(rotation)
+    return cfg
 
 
-def read_config(tool_type: str, config: dict) -> tuple[str, str]:
-    """Inverse of build_config: (mode, value) from a stored config."""
+def read_config(tool_type: str, config: dict) -> dict:
+    """Inverse of build_config: {mode, value, rotation, field} from a config."""
+    rotation = int(config.get("rotation", 0) or 0)
     if tool_type == "code_verify":
         if config.get("pattern"):
-            return (PATTERN, config["pattern"])
-        if "expected_data" in config:
-            return (FIXED, config.get("expected_data", "") or "")
-        return (ANY_CODE, "")
+            mode, value = PATTERN, config["pattern"]
+        elif "expected_data" in config:
+            mode, value = FIXED, config.get("expected_data", "") or ""
+        else:
+            mode, value = ANY_CODE, ""
+        return {"mode": mode, "value": value, "rotation": rotation, "field": ""}
+
     match = config.get("match", "exact")
+    if match == "batch_field":
+        return {"mode": BATCH_FIELD, "value": "", "rotation": rotation, "field": config.get("field", "")}
     if match == "contains":
-        return (CONTAINS, config.get("expected", "") or "")
+        return {"mode": CONTAINS, "value": config.get("expected", "") or "", "rotation": rotation, "field": ""}
     if match == "regex":
-        return (PATTERN, config.get("pattern", "") or "")
-    return (FIXED, config.get("expected", "") or "")
+        return {"mode": PATTERN, "value": config.get("pattern", "") or "", "rotation": rotation, "field": ""}
+    return {"mode": FIXED, "value": config.get("expected", "") or "", "rotation": rotation, "field": ""}
 
 
 def tool_config(tool_type: str, expected: str) -> dict:
@@ -94,7 +123,7 @@ def tool_config(tool_type: str, expected: str) -> dict:
 
 def expected_of(tool_type: str, config: dict) -> str:
     """The 'value' part of a config (mode-agnostic)."""
-    return read_config(tool_type, config)[1]
+    return read_config(tool_type, config)["value"]
 
 
 class TeachModel:

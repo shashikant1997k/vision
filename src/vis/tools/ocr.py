@@ -69,10 +69,15 @@ class OcrTextTool(InspectionTool):
     type = "ocv_text"
 
     def inspect(self, roi_image) -> ToolResult:
-        text, score = recognize(roi_image)
+        from .transform import rotate_image
+
+        roi = rotate_image(roi_image, self.config.get("rotation", 0))
+        text, score = recognize(roi)
         measured = _normalize(text, self.config)
         mode = self.config.get("match", "exact")
         expected = self.config.get("expected")
+        if expected is not None and self.config.get("uppercase"):
+            expected = expected.upper()
 
         if mode == "regex":
             pattern = self.config.get("pattern", "")
@@ -81,6 +86,11 @@ class OcrTextTool(InspectionTool):
         elif mode == "contains":
             passed = bool(expected) and expected in measured
             expected_display = expected
+        elif mode == "batch_field":
+            # unresolved batch field (e.g. during teach Test): pass if any text read.
+            # At batch run the recipe is resolved to a concrete contains-match.
+            passed = bool(measured)
+            expected_display = f"[batch field: {self.config.get('field', '')}]"
         else:
             passed = measured == expected
             expected_display = expected

@@ -23,7 +23,10 @@ from ..runtime import draw_layout, draw_overlay
 from .approve_dialog import ApproveDialog
 from .roi_label import ImageRoiLabel
 from .teach_model import (
+    BATCH_FIELD,
+    BATCH_FIELDS,
     INSPECTION_TYPES,
+    ROTATIONS,
     TeachModel,
     build_config,
     modes_for,
@@ -186,15 +189,31 @@ class TeachWindow(QMainWindow):
         self._t_mode.currentTextChanged.connect(self._tool_edited)
         self._t_value = QLineEdit()
         self._t_value.textChanged.connect(self._tool_edited)
+        self._t_field = QComboBox()
+        for key, label in BATCH_FIELDS:
+            self._t_field.addItem(label, key)
+        self._t_field.setToolTip("Which batch value (entered at batch start) this text must contain.")
+        self._t_field.currentTextChanged.connect(self._tool_edited)
+        self._t_rotation = QComboBox()
+        for deg in ROTATIONS:
+            self._t_rotation.addItem(f"{deg}°", deg)
+        self._t_rotation.setToolTip("Rotate the box before reading (for sideways print).")
+        self._t_rotation.currentTextChanged.connect(self._tool_edited)
         form = QFormLayout()
         form.addRow("Name", self._t_name)
         form.addRow("Type", self._t_type)
         form.addRow("Match", self._t_mode)
         form.addRow("Value", self._t_value)
+        form.addRow("Batch field", self._t_field)
+        form.addRow("Rotation", self._t_rotation)
         w = QWidget()
         w.setLayout(form)
         w.hide()
         return w
+
+    def _sync_tool_inputs(self, mode: str) -> None:
+        self._t_value.setEnabled(mode != BATCH_FIELD)
+        self._t_field.setEnabled(mode == BATCH_FIELD)
 
     # ---- palette / drawing ------------------------------------------------
     def _arm_tool(self, type_key: str) -> None:
@@ -299,14 +318,19 @@ class TeachWindow(QMainWindow):
         else:
             region = self._model.regions[self._selected[1]]
             tool = region.tools[self._selected[2]]
-            mode, value = read_config(tool.tool_type, tool.config)
+            info = read_config(tool.tool_type, tool.config)
             self._t_name.setText(tool.tool_id)
             self._t_type.setText(_FRIENDLY.get(tool.tool_type, tool.tool_type))
             self._t_mode.clear()
             self._t_mode.addItems(modes_for(tool.tool_type))
-            self._t_mode.setCurrentText(mode)
-            self._t_value.setText(value)
-            self._t_value.setPlaceholderText(value_hint(tool.tool_type, mode))
+            self._t_mode.setCurrentText(info["mode"])
+            self._t_value.setText(info["value"])
+            self._t_value.setPlaceholderText(value_hint(tool.tool_type, info["mode"]))
+            rotation_index = self._t_rotation.findData(info["rotation"])
+            self._t_rotation.setCurrentIndex(rotation_index if rotation_index >= 0 else 0)
+            field_index = self._t_field.findData(info["field"])
+            self._t_field.setCurrentIndex(field_index if field_index >= 0 else 0)
+            self._sync_tool_inputs(info["mode"])
             self._product_props.hide()
             self._tool_props.show()
         self._loading = False
@@ -336,8 +360,15 @@ class TeachWindow(QMainWindow):
         tool = region.tools[self._selected[2]]
         tool.tool_id = self._t_name.text()
         mode = self._t_mode.currentText() or modes_for(tool.tool_type)[0]
-        tool.config = build_config(tool.tool_type, mode, self._t_value.text().strip())
+        tool.config = build_config(
+            tool.tool_type,
+            mode,
+            self._t_value.text().strip(),
+            rotation=self._t_rotation.currentData() or 0,
+            field=self._t_field.currentData() or "",
+        )
         self._t_value.setPlaceholderText(value_hint(tool.tool_type, mode))
+        self._sync_tool_inputs(mode)
         item = self._tree.currentItem()
         if item is not None:
             friendly = _FRIENDLY.get(tool.tool_type, tool.tool_type)

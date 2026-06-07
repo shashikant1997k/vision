@@ -29,8 +29,11 @@ Early kickoff — requirements and architecture defined; implementation not yet 
 | [System Architecture](docs/04-system-architecture.md) | The 5 layers, components, data model, tech stack |
 | [OCR/OCV Engine Design](docs/05-ocr-ocv-engine.md) | The throughput-critical inspection engine |
 | [Compliance (21 CFR Part 11 / Annex 11)](docs/06-compliance.md) | Regulatory requirements and how we meet them |
+| [Camera Module](docs/10-camera-module.md) | Vendor-neutral camera hardware layer |
 | [Decision Log](docs/decisions/decision-log.md) | Key decisions and their rationale |
 | [Open Questions & Research Backlog](docs/07-research-backlog.md) | What we still need to confirm |
+| [Validation Package (IQ/OQ, Part 11)](docs/validation/README.md) | Pharma deployment qualification |
+| [Deployment & Installation](docs/deployment/installation.md) | Install, configure, run; packaging |
 
 ## Key facts
 

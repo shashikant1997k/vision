@@ -17,6 +17,11 @@ models/*.onnx
 *.db
 *.sqlite
 
+# Generated reports / qualification evidence / build artifacts
+reports/
+oq-evidence.xml
+*.spec.bak
+
 # OS / editor
 .DS_Store
 .idea/

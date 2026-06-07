@@ -47,6 +47,11 @@ src/vis/
 │   ├── users.py     # UserService — create/authenticate (lockout) + verify_user (e-sign re-auth)
 │   ├── batches.py   # BatchService — start (approved recipe) + close (release e-signature)
 │   └── store.py     # ResultStore (persist results) + RecipeRepository (RBAC + e-sign + audited)
+├── runtime/         # live run loop (acquisition → pool → reject)
+│   ├── runner.py    # InspectionRunner — one acquisition thread per camera
+│   ├── stats.py     # LiveStats — thread-safe per-camera + total counters
+│   ├── live_view.py # LiveView — latest frame + results per camera (for the HMI)
+│   └── reject.py    # RejectHandler — reject routing / ejector I/O seam
 ├── reporting/
 │   └── batch_report.py # compute_summary + CSV export + signed HTML batch report
 └── cli.py           # demo recipes + runnable entrypoint (--source, --tcp-server, --db)
@@ -58,6 +63,7 @@ tests/
 ├── test_code_verify.py # real QR decode + verify + grade
 ├── test_ocr.py         # real OCR text read + match/regex + pipeline
 ├── test_camera.py      # camera settings/trigger, FileCamera replay, manager, calibration
+├── test_runtime.py     # multi-camera live loop, per-camera stats, reject routing
 ├── test_sim.py         # simulated code line, multi-product
 ├── test_audit.py       # audit hash-chain validity + tamper detection
 ├── test_persistence.py # results persisted; recipe save/approve audited + RBAC-gated

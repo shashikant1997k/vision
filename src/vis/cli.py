@@ -118,19 +118,29 @@ def main() -> None:
         default="",
         help="if set (e.g. sqlite:///run.db), persist inspection results to this DB",
     )
+    parser.add_argument("--cameras", type=int, default=1, help="number of cameras to run")
     args = parser.parse_args()
 
-    if args.source in ("sim", "ocr"):
-        from .engine.sim import SimulatedCodeCamera
-
-        recipe = build_ocr_demo_recipe() if args.source == "ocr" else build_code_demo_recipe()
-        camera = SimulatedCodeCamera(
-            "cam1", recipe, num_frames=args.frames, defect_rate=args.defect_rate
-        )
+    if args.source == "ocr":
+        recipe = build_ocr_demo_recipe()
+    elif args.source == "sim":
+        recipe = build_code_demo_recipe()
     else:
         recipe = build_demo_recipe()
-        camera = FakeCamera("cam1", recipe, num_frames=args.frames, defect_rate=args.defect_rate)
 
+    def make_camera(index: int):
+        cam_id = f"cam{index + 1}"
+        if args.source in ("sim", "ocr"):
+            from .engine.sim import SimulatedCodeCamera
+
+            return SimulatedCodeCamera(
+                cam_id, recipe, num_frames=args.frames, defect_rate=args.defect_rate, seed=index
+            )
+        return FakeCamera(
+            cam_id, recipe, num_frames=args.frames, defect_rate=args.defect_rate, seed=index
+        )
+
+    cameras = [make_camera(i) for i in range(args.cameras)]
     pool = ProcessPool(args.workers) if args.workers > 0 else SyncPool()
     bus = EventBus()
     rejects: list = []
@@ -156,23 +166,33 @@ def main() -> None:
         bus.subscribe("inspection.result", ResultStore(make_session_factory(engine)).on_result)
         print(f"[db] persisting results to {args.db}")
 
-    pipeline = InspectionPipeline(recipe, pool, bus)
+    from .runtime import InspectionRunner, RecordingRejectHandler
 
-    total = passed = 0
-    for frame in camera.frames():
-        for r in pipeline.process_frame(frame):
-            total += 1
-            passed += int(r.passed)
-            status = "PASS" if r.passed else f"REJECT -> {r.reject_output}"
-            codes = [tr for tr in r.tool_results if tr.detail.get("grade")]
-            extra = f"  [grade {codes[0].detail['grade']['overall']}]" if codes else ""
-            print(f"frame {frame.frame_id:>3}  {r.region_id}: {status}{extra}")
+    def _print_result(r):
+        status = "PASS" if r.passed else f"REJECT -> {r.reject_output}"
+        codes = [tr for tr in r.tool_results if tr.detail.get("grade")]
+        extra = f"  [grade {codes[0].detail['grade']['overall']}]" if codes else ""
+        print(f"{r.camera_id} f{r.frame_id:>3}  {r.region_id}: {status}{extra}")
+
+    bus.subscribe("inspection.result", _print_result)
+
+    reject_handler = RecordingRejectHandler()
+    runner = InspectionRunner(
+        [(c, recipe) for c in cameras], pool, bus=bus, reject_handler=reject_handler
+    )
+    print(f"running {len(cameras)} camera(s), source={args.source}...")
+    stats = runner.run()
     pool.close()
     if transport is not None:
         transport.close()
 
+    totals = stats.totals()
     pool_kind = f"ProcessPool({args.workers})" if args.workers > 0 else "SyncPool"
-    print(f"\n[{pool_kind}] {passed}/{total} regions passed; {len(rejects)} rejects routed")
+    print(f"\n[{pool_kind}] per-camera: {stats.snapshot()}")
+    print(
+        f"[totals] {totals['passed']}/{totals['total']} regions passed; "
+        f"{reject_handler.count()} rejects routed"
+    )
 
 
 if __name__ == "__main__":

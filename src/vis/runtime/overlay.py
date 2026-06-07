@@ -41,8 +41,8 @@ def _label(draw, xy, text, color, font):
     """Draw text with a dark backing box so it's readable over any image."""
     x, y = xy
     try:
-        l, t, r, b = draw.textbbox((x, y), text, font=font)
-        draw.rectangle([l - 2, t - 1, r + 2, b + 1], fill=(0, 0, 0))
+        left, top, right, bottom = draw.textbbox((x, y), text, font=font)
+        draw.rectangle([left - 2, top - 1, right + 2, bottom + 1], fill=(0, 0, 0))
     except Exception:
         pass
     draw.text((x, y), text, fill=color, font=font)

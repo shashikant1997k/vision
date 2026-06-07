@@ -6,7 +6,6 @@ from .common.events import EventBus
 from .common.types import ROI
 from .domain.entities import Recipe, Region, ToolSpec
 from .engine.camera import FakeCamera
-from .engine.pipeline import InspectionPipeline
 from .engine.pool import ProcessPool, SyncPool
 from .tools.gs1 import GS
 

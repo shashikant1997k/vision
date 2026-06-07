@@ -26,7 +26,7 @@ The must-ship core that makes us credible and deployable on a real pharma line.
 ### HMI (Qt desktop — the line UI, D-015)
 - [x] Login screen (authenticates via UserService) — *done*.
 - [x] Live-view screen: annotated camera feed + running counters + start/stop — *done*.
-- [x] Teach screen (define regions/tools, test against a reference image, save draft recipe) — *done; interactive mouse-drag ROI drawing + recipe approve-from-HMI pending*.
+- [x] Teach screen (interactive **drag-to-draw** ROIs, configure tools, test, save draft, **approve with e-signature**) — *done*.
 - [ ] Camera-settings & calibration screen; user/station admin screens.
 
 ### Recipe / product

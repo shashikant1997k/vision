@@ -67,6 +67,102 @@ def test_teach_save_draft(tmp_path):
         assert rec is not None and rec.status == "draft"
 
 
+def _qapp():
+    from PySide6.QtWidgets import QApplication
+
+    return QApplication.instance() or QApplication([])
+
+
+def _qa_setup(tmp_path):
+    from vis.db.base import init_db, make_engine, make_session_factory
+    from vis.db.users import UserService
+
+    engine = make_engine(f"sqlite:///{tmp_path}/t.db")
+    init_db(engine)
+    sf = make_session_factory(engine)
+    users = UserService(sf)
+    users.seed_roles()
+    qa_id = users.create_user("qa", "Secret123", roles=("qa_manager",))
+    return sf, qa_id
+
+
+def test_display_to_image_roi_mapping():
+    from vis.hmi.roi_label import display_to_image_roi
+
+    # label 800x600, img 400x300 -> scale 2, no letterbox
+    assert display_to_image_roi((0, 0), (200, 200), (800, 600), (400, 300)) == (0, 0, 100, 100)
+
+
+def test_display_to_image_roi_clamps_to_image():
+    from vis.hmi.roi_label import display_to_image_roi
+
+    assert display_to_image_roi((-50, -50), (9999, 9999), (800, 600), (400, 300)) == (0, 0, 400, 300)
+
+
+def test_approve_dialog_collects_values():
+    pytest.importorskip("PySide6")
+    _qapp()
+    from vis.hmi.approve_dialog import ApproveDialog
+
+    dlg = ApproveDialog()
+    dlg._password.setText("pw")
+    dlg._meaning.setText("released")
+    dlg._accept()
+    assert dlg.password_value == "pw" and dlg.meaning_value == "released"
+
+
+def test_teach_on_roi_fills_region_and_tool_fields(tmp_path):
+    pytest.importorskip("PySide6")
+    _qapp()
+    sf, qa_id = _qa_setup(tmp_path)
+    from vis.hmi.teach_window import TeachWindow
+
+    win = TeachWindow(
+        user_id=qa_id, reference_image=_reference_frame().image,
+        session_factory=sf, reject_lanes=["lane1", "lane2"],
+    )
+    win._draw_target.setCurrentText("Region")
+    win._on_roi(400, 0, 360, 480)
+    assert (win._rx.value(), win._rw.value()) == (400, 360)
+
+    win._region_name.setText("P2")
+    win._add_region()
+    win._draw_target.setCurrentText("Tool")
+    win._on_roi(430, 30, 300, 300)  # absolute; region origin (400,0) -> relative (30,30)
+    assert (win._tx.value(), win._ty.value()) == (30, 30)
+
+
+def test_teach_save_then_approve(tmp_path):
+    pytest.importorskip("PySide6")
+    _qapp()
+    sf, qa_id = _qa_setup(tmp_path)
+    from vis.db.models import Recipe as RecipeRow
+    from vis.db.store import RecipeRepository
+    from vis.hmi.teach_window import TeachWindow
+
+    win = TeachWindow(
+        user_id=qa_id, reference_image=_reference_frame().image,
+        session_factory=sf, reject_lanes=["lane1", "lane2"],
+    )
+    win._rw.setValue(360)
+    win._rh.setValue(480)
+    win._add_region()
+    win._tool_type.setCurrentText("code_verify")
+    win._tx.setValue(30)
+    win._ty.setValue(30)
+    win._tw.setValue(300)
+    win._th.setValue(300)
+    win._expected.setText(_gs1("SN0001"))
+    win._add_tool()
+    win._save()
+    assert win._saved_recipe_id is not None and win._approve_btn.isEnabled()
+
+    # the approve dialog is modal; exercise the underlying approval directly
+    RecipeRepository(sf).approve(win._saved_recipe_id, qa_id, "Secret123", "released")
+    with sf() as s:
+        assert s.get(RecipeRow, win._saved_recipe_id).status == "approved"
+
+
 def test_teach_window_smoke(tmp_path):
     pytest.importorskip("PySide6")
     from PySide6.QtWidgets import QApplication

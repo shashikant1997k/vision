@@ -66,7 +66,9 @@ src/vis/
 │   ├── login.py     # LoginDialog (authenticates via UserService)
 │   ├── main_window.py # MainWindow — live view (annotated feed + counters + start/stop + Teach…)
 │   ├── teach_model.py # TeachModel — pure recipe-build/test logic (no Qt)
-│   ├── teach_window.py # TeachWindow — define regions/tools, test, save draft recipe
+│   ├── teach_window.py # TeachWindow — drag-to-draw ROIs, configure tools, test, save, approve
+│   ├── roi_label.py  # ImageRoiLabel — drag a rectangle → ROI in image coords
+│   ├── approve_dialog.py # ApproveDialog — password + meaning for e-signature approval
 │   ├── image.py     # numpy frame -> QPixmap
 │   └── app.py       # entry point (vis-hmi)
 ├── reporting/

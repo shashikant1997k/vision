@@ -46,10 +46,42 @@ def _pad(image, border: int):
     return out
 
 
+def _reading_order(result):
+    """Sort detected text boxes into reading order: cluster boxes into lines by
+    vertical position, then order each line left-to-right (RapidOCR doesn't
+    guarantee order, which otherwise scrambles words)."""
+    boxes = []
+    for item in result:
+        box = item[0]
+        try:
+            ys = [p[1] for p in box]
+            xs = [p[0] for p in box]
+            center_y = (min(ys) + max(ys)) / 2
+            boxes.append([center_y, min(xs), max(ys) - min(ys), item])
+        except Exception:
+            boxes.append([0.0, 0.0, 1.0, item])
+    if not boxes:
+        return result
+    avg_h = sum(b[2] for b in boxes) / len(boxes) or 1
+    threshold = avg_h * 0.7
+    boxes.sort(key=lambda b: b[0])  # by vertical centre
+    lines: list = []
+    for b in boxes:
+        if lines and abs(b[0] - lines[-1][0]) <= threshold:
+            lines[-1][1].append(b)
+        else:
+            lines.append([b[0], [b]])
+    ordered = []
+    for _, line in lines:
+        line.sort(key=lambda b: b[1])  # left to right within the line
+        ordered.extend(b[3] for b in line)
+    return ordered
+
+
 def recognize(roi_image) -> tuple[str, float]:
     """Return (text, mean_confidence) for a cropped ROI image. Pads the crop so
-    the detector has margin, and falls back to whole-crop recognition (so a tight
-    single-line box still reads)."""
+    the detector has margin, reads pieces in reading order, and falls back to
+    whole-crop recognition (so a tight single-line box still reads)."""
     engine = _engine()
     image = _pad(roi_image, 20)
     result, _ = engine(image)
@@ -60,8 +92,9 @@ def recognize(roi_image) -> tuple[str, float]:
             result = None
     if not result:
         return "", 0.0
-    texts = [item[1] for item in result]
-    scores = [float(item[2]) for item in result]
+    items = _reading_order(result)
+    texts = [item[1] for item in items]
+    scores = [float(item[2]) for item in items]
     return " ".join(texts).strip(), (sum(scores) / len(scores))
 
 
@@ -93,17 +126,25 @@ class OcrTextTool(InspectionTool):
     def inspect(self, roi_image) -> ToolResult:
         from .transform import rotate_image
 
-        roi = rotate_image(roi_image, self.config.get("rotation", 0))
+        rotation = self.config.get("rotation", 0)
+        roi = rotate_image(roi_image, rotation)
         text, score = recognize(roi)
-        if not text:
-            # auto-recover sideways print: try the other 90° orientations
-            best = ("", 0.0)
+        # Only search orientations when the straight read is WEAK (empty / a few
+        # chars / low confidence) — otherwise we'd risk "improving" a good read
+        # into a 180°-flipped one. For reliable reading, orient the image upright
+        # (Rotate image) or set an explicit Rotation.
+        weak = (not text) or (len(text.replace(" ", "")) < 3) or (score < 0.4)
+        if not rotation and weak:
+
+            def _metric(t, s):
+                return len(t.replace(" ", "")) * max(s, 0.01)
+
+            best_text, best_score, best = text, score, _metric(text, score)
             for extra in (90, 180, 270):
                 t2, s2 = recognize(rotate_image(roi, extra))
-                if t2 and s2 > best[1]:
-                    best = (t2, s2)
-            if best[0]:
-                text, score = best
+                if _metric(t2, s2) > best:
+                    best_text, best_score, best = t2, s2, _metric(t2, s2)
+            text, score = best_text, best_score
         measured = _normalize(text, self.config)
         mode = self.config.get("match", "exact")
         expected = self.config.get("expected")

@@ -30,6 +30,9 @@ src/vis/
 │   └── pipeline.py  # frame -> crop -> pool -> aggregate -> publish results/rejects
 ├── models/
 │   └── registry.py  # ModelRegistry — locked, hashed, versioned models (D-007)
+├── io/              # reject / digital I/O (ejector driver)
+│   ├── digital_io.py # DigitalIO + SimulatedIO (dev/test) + ModbusTcpIO (real line)
+│   └── reject.py     # RejectController — eject delay then pulse the lane output
 ├── camera/          # vendor-neutral camera hardware module (docs/10, D-015)
 │   ├── settings.py  # CameraSettings + TriggerConfig (exposure/gain/trigger/ROI)
 │   ├── device.py    # CameraDevice ABC + CameraInfo (open/configure/grab/frames)
@@ -66,6 +69,7 @@ tests/
 ├── test_camera.py      # camera settings/trigger, FileCamera replay, manager, calibration
 ├── test_runtime.py     # multi-camera live loop, per-camera stats, reject routing
 ├── test_overlay.py     # annotated-frame rendering (pass green / reject red)
+├── test_reject_io.py   # digital I/O pulses, reject controller, ejector lane routing
 ├── test_sim.py         # simulated code line, multi-product
 ├── test_audit.py       # audit hash-chain validity + tamper detection
 ├── test_persistence.py # results persisted; recipe save/approve audited + RBAC-gated

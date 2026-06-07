@@ -13,7 +13,7 @@ The must-ship core that makes us credible and deployable on a real pharma line.
 - [x] Basic calibration (pixel ↔ mm) — *done (Calibration; distortion model TODO)*.
 - [x] Live mode with running pass/fail/reject counters per camera + **result overlays** — *done (InspectionRunner + LiveStats + draw_overlay: ROI boxes, pass/fail color, read values, grade)*.
 - [x] **Multi-product-in-one-FOV (track-to-region mapping):** N products per frame, each its own Region with its own ROIs/tools and pass/fail — *done*.
-- [x] **Per-region reject routing** to the correct lane/output — *done (RejectHandler); real digital-I/O ejector + eject timing pending (Windows)*.
+- [x] **Per-region reject routing** to the correct lane/output, with per-lane eject timing — *done (RejectController + DigitalIO: eject-delay + pulse; SimulatedIO for dev, ModbusTcpIO for the line). Encoder-count timing + last-reject image review pending*.
 
 ### Inspection tools (classic — the revenue core)
 - [x] **OCR/OCV** for fixed + variable text (lot, expiry, MRP) — *done: ONNX PaddleOCR/RapidOCR, exact/contains/regex matching; INT8 rec-only throughput path still TODO*.

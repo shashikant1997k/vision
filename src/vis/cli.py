@@ -120,6 +120,9 @@ def main() -> None:
     )
     parser.add_argument("--cameras", type=int, default=1, help="number of cameras to run")
     parser.add_argument(
+        "--eject-delay-ms", type=int, default=0, help="inspection-to-ejector travel delay"
+    )
+    parser.add_argument(
         "--save-overlays",
         default="",
         help="if set, write annotated frames (ROI boxes + results) to this directory",
@@ -171,7 +174,7 @@ def main() -> None:
         bus.subscribe("inspection.result", ResultStore(make_session_factory(engine)).on_result)
         print(f"[db] persisting results to {args.db}")
 
-    from .runtime import InspectionRunner, RecordingRejectHandler
+    from .runtime import InspectionRunner
 
     def _print_result(r):
         status = "PASS" if r.passed else f"REJECT -> {r.reject_output}"
@@ -196,7 +199,15 @@ def main() -> None:
             path = os.path.join(args.save_overlays, f"{frame.camera_id}_f{frame.frame_id:03d}.png")
             Image.fromarray(annotated).save(path)
 
-    reject_handler = RecordingRejectHandler()
+    from .io import RejectController, RejectOutputConfig, SimulatedIO
+
+    lanes = sorted({region.reject_output for region in recipe.regions})
+    sim_io = SimulatedIO()
+    reject_handler = RejectController(
+        [RejectOutputConfig(lane, channel=i + 1, eject_delay_ms=args.eject_delay_ms)
+         for i, lane in enumerate(lanes)],
+        io=sim_io,
+    )
     runner = InspectionRunner(
         [(c, recipe) for c in cameras],
         pool,
@@ -212,10 +223,11 @@ def main() -> None:
 
     totals = stats.totals()
     pool_kind = f"ProcessPool({args.workers})" if args.workers > 0 else "SyncPool"
+    pulses = {lane: sim_io.pulse_count(i + 1) for i, lane in enumerate(lanes)}
     print(f"\n[{pool_kind}] per-camera: {stats.snapshot()}")
     print(
         f"[totals] {totals['passed']}/{totals['total']} regions passed; "
-        f"{reject_handler.count()} rejects routed"
+        f"{reject_handler.fired} ejector pulses {pulses}"
     )
 
 

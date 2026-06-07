@@ -22,9 +22,15 @@ class InspectionPipeline:
         self.bus = bus or EventBus()
 
     def _build_tasks(self, frame: Frame) -> list[ToolTask]:
+        image = frame.image
+        rotation = getattr(self.recipe, "image_rotation", 0)
+        if rotation:
+            from ..tools.transform import rotate_image
+
+            image = rotate_image(image, rotation)
         tasks: list[ToolTask] = []
         for region in self.recipe.regions:
-            region_img = crop(frame.image, region.roi)
+            region_img = crop(image, region.roi)
             for tool in region.tools:
                 roi_img = crop(region_img, tool.roi)
                 tasks.append(

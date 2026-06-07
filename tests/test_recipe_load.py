@@ -40,6 +40,16 @@ def test_list_and_load_approved_recipe(tmp_path):
     assert code_tool.config.get("expected_data")
 
 
+def test_load_preserves_image_rotation(tmp_path):
+    sf, qa_id = _setup(tmp_path)
+    repo = RecipeRepository(sf)
+    recipe = build_code_demo_recipe()
+    recipe.image_rotation = 90
+    rid = repo.save_draft(recipe, user_id=qa_id)
+    repo.approve(rid, qa_id, "Secret123", "released")
+    assert repo.load(rid).image_rotation == 90
+
+
 def test_load_missing_recipe_raises(tmp_path):
     sf, _ = _setup(tmp_path)
     with pytest.raises(ValueError):

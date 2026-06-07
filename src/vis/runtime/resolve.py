@@ -54,4 +54,7 @@ def resolve_batch_fields(recipe: Recipe, batch_data: dict | None) -> Recipe:
                 pass_logic=getattr(region, "pass_logic", "all"),
             )
         )
-    return Recipe(recipe.recipe_id, recipe.product, recipe.version, regions)
+    return Recipe(
+        recipe.recipe_id, recipe.product, recipe.version, regions,
+        image_rotation=getattr(recipe, "image_rotation", 0),
+    )

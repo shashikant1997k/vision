@@ -63,6 +63,7 @@ class Recipe(Base):
     product_id: Mapped[int] = mapped_column(ForeignKey("products.id"))
     version: Mapped[int] = mapped_column(Integer)
     status: Mapped[str] = mapped_column(String(16), default="draft")  # draft/approved/retired
+    image_rotation: Mapped[int] = mapped_column(Integer, default=0)
     camera_settings: Mapped[dict | None] = mapped_column(JSONType, default=dict)
     created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     approved_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))

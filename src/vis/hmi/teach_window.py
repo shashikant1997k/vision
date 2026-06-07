@@ -84,6 +84,7 @@ class TeachWindow(QMainWindow):
         # --- image (drawable) ---
         self._image = ImageRoiLabel()
         self._image.roiSelected.connect(self._on_roi_drawn)
+        self._image.roiAdjusted.connect(self._on_roi_adjusted)
         self._guide = QLabel()
         self._guide.setWordWrap(True)
         self._guide.setStyleSheet("padding:6px; background:#eef; border:1px solid #99c")
@@ -94,12 +95,16 @@ class TeachWindow(QMainWindow):
         prev_btn.clicked.connect(self._prev_image)
         next_btn = QPushButton("Next ▶")
         next_btn.clicked.connect(self._next_image)
+        rotate_btn = QPushButton("Rotate image ⟳")
+        rotate_btn.setToolTip("Rotate the whole image (for a sideways-mounted camera / photo).")
+        rotate_btn.clicked.connect(self._rotate_image)
         test_all_btn = QPushButton("Test all images")
         test_all_btn.clicked.connect(self._test_all)
         film = QHBoxLayout()
         film.addWidget(prev_btn)
         film.addWidget(self._img_label)
         film.addWidget(next_btn)
+        film.addWidget(rotate_btn)
         film.addStretch(1)
         film.addWidget(test_all_btn)
         film_widget = QWidget()
@@ -319,11 +324,39 @@ class TeachWindow(QMainWindow):
         self._rebuild_tree()
         self._refresh_view()
 
+    def _teach_image(self):
+        from ..tools.transform import rotate_image
+
+        return rotate_image(self._reference, self._model.image_rotation)
+
+    def _rotate_image(self) -> None:
+        self._model.image_rotation = (self._model.image_rotation + 90) % 360
+        teach = self._teach_image()
+        h, w = teach.shape[:2]
+        if self._model.regions:
+            self._model.regions[0].roi = ROI(0, 0, w, h)  # keep the default product full-frame
+        self._last_results = None
+        self._refresh_view()
+
+    def _on_roi_adjusted(self, x: int, y: int, w: int, h: int) -> None:
+        """A selected box's handles were dragged — update its ROI."""
+        if self._selected is None:
+            return
+        if self._selected[0] == "region":
+            self._model.regions[self._selected[1]].roi = ROI(x, y, w, h)
+        else:
+            region = self._model.regions[self._selected[1]]
+            region.tools[self._selected[2]].roi = ROI(
+                max(0, x - region.roi.x), max(0, y - region.roi.y), w, h
+            )
+        self._last_results = None
+        self._refresh_view()
+
     def _ensure_region(self) -> int:
         """Return a valid product index, creating a default full-frame product
         if none exists (so drawing an inspection never crashes)."""
         if not self._model.regions:
-            h, w = self._reference.shape[:2]
+            h, w = self._teach_image().shape[:2]
             return self._model.add_region("Product 1", ROI(0, 0, w, h), self._lanes[0])
         if self._selected is not None and self._selected[1] < len(self._model.regions):
             return self._selected[1]
@@ -473,13 +506,14 @@ class TeachWindow(QMainWindow):
         return (region.roi.x + t.x, region.roi.y + t.y, t.w, t.h)
 
     def _refresh_view(self) -> None:
+        base = self._teach_image()
         if self._last_results is not None:
-            image = draw_overlay(self._reference, self._model.to_recipe(), self._last_results)
+            image = draw_overlay(base, self._model.to_recipe(), self._last_results)
         else:
-            image = draw_layout(
-                self._reference, self._model.to_recipe(), highlight=self._selected_abs_roi()
-            )
+            image = draw_layout(base, self._model.to_recipe())
         self._image.setImage(image)
+        # selection handles (off while armed to draw a new box)
+        self._image.set_selected_roi(None if self._pending else self._selected_abs_roi())
 
     def _set_guide(self, text: str) -> None:
         self._guide.setText(text)

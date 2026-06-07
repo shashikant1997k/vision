@@ -131,6 +131,7 @@ class TeachModel:
         self.product = product
         self.recipe_id = recipe_id
         self.regions: list[Region] = []
+        self.image_rotation = 0
 
     def add_region(self, name: str, roi: ROI, reject_output: str) -> int:
         region_id = f"region{len(self.regions) + 1}"
@@ -150,10 +151,14 @@ class TeachModel:
         del self.regions[region_index].tools[tool_index]
 
     def to_recipe(self) -> Recipe:
-        return Recipe(self.recipe_id, self.product, 1, list(self.regions))
+        return Recipe(
+            self.recipe_id, self.product, 1, list(self.regions),
+            image_rotation=self.image_rotation,
+        )
 
     def test(self, image) -> list:
-        """Run the in-progress recipe against a reference image (one frame)."""
+        """Run the in-progress recipe against a raw reference image (the pipeline
+        applies the recipe's image rotation)."""
         pipeline = InspectionPipeline(self.to_recipe(), SyncPool())
         frame = Frame("teach", 0, image, 0.0)
         return pipeline.process_frame(frame)

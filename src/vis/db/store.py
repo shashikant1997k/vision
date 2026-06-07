@@ -123,6 +123,7 @@ class RecipeRepository:
                 product_id=product.id,
                 version=max_version + 1,
                 status="draft",
+                image_rotation=getattr(domain_recipe, "image_rotation", 0),
                 created_by=user_id,
             )
             s.add(recipe)
@@ -206,6 +207,7 @@ class RecipeRepository:
                 product=product.name if product else "",
                 version=rec.version,
                 regions=regions,
+                image_rotation=rec.image_rotation or 0,
             )
 
     def approve(

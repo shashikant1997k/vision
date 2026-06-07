@@ -40,6 +40,7 @@ class Recipe:
     product: str
     version: int
     regions: list[Region] = field(default_factory=list)
+    image_rotation: int = 0  # rotate every frame this many degrees before inspecting
 
 
 @dataclass

@@ -158,6 +158,30 @@ def test_teach_starts_with_a_default_product():
     assert len(win._model.regions) == 1  # full-frame product ready to use
 
 
+def test_teach_rotate_image():
+    pytest.importorskip("PySide6")
+    _qapp()
+    win = _teach_window(None, 1)
+    h, w = win._reference.shape[:2]
+    win._rotate_image()
+    assert win._model.image_rotation == 90
+    # default product resized to the rotated frame (w<->h swapped)
+    assert (win._model.regions[0].roi.w, win._model.regions[0].roi.h) == (h, w)
+
+
+def test_teach_adjust_roi_with_handles(tmp_path):
+    pytest.importorskip("PySide6")
+    _qapp()
+    sf, qa_id = _qa_setup(tmp_path)
+    win = _teach_window(sf, qa_id)
+    win._arm_tool("code_verify")
+    win._on_roi_drawn(30, 30, 300, 300)
+    win._selected = ("tool", 0, 0)
+    win._on_roi_adjusted(50, 60, 200, 200)  # dragged handles -> new ROI
+    roi = win._model.regions[0].tools[0].roi
+    assert (roi.x, roi.y, roi.w, roi.h) == (50, 60, 200, 200)
+
+
 def test_teach_image_bank_and_test_all(tmp_path):
     pytest.importorskip("PySide6")
     _qapp()

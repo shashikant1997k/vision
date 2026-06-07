@@ -9,8 +9,8 @@ The must-ship core that makes us credible and deployable on a real pharma line.
 ### Acquisition & runtime
 - [ ] GigE Vision / GenICam acquisition (vendor-neutral), **multi-camera** (N cameras per line PC, each independent).
 - [ ] Hardware / encoder trigger; software trigger for setup.
-- [ ] Camera controls: exposure, gain, white balance, ROI, frame rate, packet size.
-- [ ] Basic calibration (pixel ↔ mm).
+- [x] Camera controls: exposure, gain, white balance, ROI, frame rate, packet size — *done (CameraSettings model + GenICam apply); hardware apply runs on Windows*.
+- [x] Basic calibration (pixel ↔ mm) — *done (Calibration; distortion model TODO)*.
 - [ ] Live mode with result overlays + running pass/fail/reject counters (per camera).
 - [ ] **Multi-product-in-one-FOV (track-to-region mapping):** N products per frame, each its own Region with its own ROIs/tools and pass/fail.
 - [ ] **Per-region reject routing** to the correct lane/output, with per-lane eject timing; last-reject image review.

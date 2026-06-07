@@ -30,6 +30,13 @@ src/vis/
 │   └── pipeline.py  # frame -> crop -> pool -> aggregate -> publish results/rejects
 ├── models/
 │   └── registry.py  # ModelRegistry — locked, hashed, versioned models (D-007)
+├── camera/          # vendor-neutral camera hardware module (docs/10, D-015)
+│   ├── settings.py  # CameraSettings + TriggerConfig (exposure/gain/trigger/ROI)
+│   ├── device.py    # CameraDevice ABC + CameraInfo (open/configure/grab/frames)
+│   ├── file_source.py # FileCamera — replay images from disk (dev/test on macOS)
+│   ├── genicam.py   # HarvesterCamera — real GigE Vision/GenICam driver (Windows)
+│   ├── manager.py   # CameraManager — multi-camera lifecycle
+│   └── calibration.py # pixel <-> mm
 ├── security/        # auth + RBAC (Part 11 access control)
 │   ├── passwords.py # PBKDF2-HMAC-SHA256 hashing + PasswordPolicy (stdlib, no native deps)
 │   └── authz.py     # permission codes, default roles, require()/has_permission()
@@ -50,6 +57,7 @@ tests/
 ├── test_gs1.py         # GS1 AI parser
 ├── test_code_verify.py # real QR decode + verify + grade
 ├── test_ocr.py         # real OCR text read + match/regex + pipeline
+├── test_camera.py      # camera settings/trigger, FileCamera replay, manager, calibration
 ├── test_sim.py         # simulated code line, multi-product
 ├── test_audit.py       # audit hash-chain validity + tamper detection
 ├── test_persistence.py # results persisted; recipe save/approve audited + RBAC-gated

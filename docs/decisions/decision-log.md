@@ -4,6 +4,11 @@ Lightweight ADR-style record of decisions and their rationale. Newest at top. St
 
 ---
 
+## D-015 — UI split: Qt desktop HMI for the line, web only for reporting/admin
+**Date:** 2026-06-07 · **Status:** Accepted (re-affirmed)
+**Decision:** The **line/runtime HMI is a Windows desktop app (PySide6/Qt)** — live view, teach, camera settings, run mode, reject. The **web UI is only for reporting/admin/fleet** (browser, off-line). This was always the architecture (docs/04); recorded explicitly to remove ambiguity.
+**Priority:** Build the **camera module and inspection features first**; both UIs come after. The camera hardware layer is built vendor-neutrally and tested on macOS via file/simulation sources; the real GenICam/Harvester driver (D-011) runs on the Windows line PC behind the same interface.
+
 ## D-014 — External integration: TCP/IP result publishing to third-party apps
 **Date:** 2026-06-07 · **Status:** Accepted
 **Decision:** A configurable integration layer publishes scanned/inspection data to **any third-party application over TCP/IP**. Each connector is configurable as **TCP server** (peer connects to us) or **TCP client** (we connect to their host:port), with a configurable **message format** (line-framed JSON default + delimited/templated for host systems), pushing **per inspection result in real time**. **Store-and-forward buffering + auto-reconnect** so data survives peer downtime. Subscribes to the internal **EventBus** (decoupled from the engine). All egress logged for audit; connector config under change control.

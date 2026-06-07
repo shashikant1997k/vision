@@ -82,6 +82,7 @@ class RegionRow(Base):
     seq: Mapped[int] = mapped_column(Integer, default=0)
     roi: Mapped[dict] = mapped_column(JSONType)
     reject_output: Mapped[str] = mapped_column(String(64), default="default")
+    pass_logic: Mapped[str] = mapped_column(String(8), default="all")
     recipe: Mapped[Recipe] = relationship(back_populates="regions")
     tools: Mapped[list["ToolRow"]] = relationship(
         cascade="all, delete-orphan", back_populates="region"

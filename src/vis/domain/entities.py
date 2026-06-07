@@ -29,6 +29,7 @@ class Region:
     roi: ROI  # within the camera frame
     reject_output: str  # which reject lane this region routes to
     tools: list[ToolSpec] = field(default_factory=list)
+    pass_logic: str = "all"  # "all" required inspections pass, or "any" passes
 
 
 @dataclass

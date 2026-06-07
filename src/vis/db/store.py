@@ -136,6 +136,7 @@ class RecipeRepository:
                     seq=i,
                     roi=_roi(region.roi),
                     reject_output=region.reject_output,
+                    pass_logic=getattr(region, "pass_logic", "all"),
                 )
                 s.add(region_row)
                 s.flush()
@@ -197,6 +198,7 @@ class RecipeRepository:
                         ROI(**region_row.roi),
                         region_row.reject_output,
                         tools,
+                        pass_logic=region_row.pass_logic or "all",
                     )
                 )
             return DomainRecipe(

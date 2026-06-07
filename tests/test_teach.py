@@ -158,6 +158,30 @@ def test_teach_starts_with_a_default_product():
     assert len(win._model.regions) == 1  # full-frame product ready to use
 
 
+def test_teach_image_bank_and_test_all(tmp_path):
+    pytest.importorskip("PySide6")
+    _qapp()
+    sf, qa_id = _qa_setup(tmp_path)
+    from vis.engine.sim import SimulatedCodeCamera
+    from vis.hmi.teach_window import TeachWindow
+
+    recipe = build_code_demo_recipe()
+    bank = [f.image for f in SimulatedCodeCamera("ref", recipe, num_frames=4, defect_rate=0.0).frames()]
+    win = TeachWindow(
+        user_id=qa_id, reference_image=bank[0], reference_images=bank,
+        session_factory=sf, reject_lanes=["lane1", "lane2"],
+    )
+    assert len(win._bank) == 4
+    assert win._img_label.text() == "Image 1 / 4"
+    win._next_image()
+    assert win._reference_index == 1 and win._img_label.text() == "Image 2 / 4"
+
+    win._arm_tool("code_verify")
+    win._on_roi_drawn(30, 30, 300, 300)
+    win._test_all()
+    assert "captured image" in win._status.text()
+
+
 def test_teach_add_inspection_by_drawing(tmp_path):
     pytest.importorskip("PySide6")
     _qapp()

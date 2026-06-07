@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDialog,
     QFormLayout,
@@ -52,6 +53,7 @@ class TeachWindow(QMainWindow):
         *,
         user_id,
         reference_image: np.ndarray,
+        reference_images: list | None = None,
         session_factory=None,
         product: str = "New Product",
         recipe_id: str = "recipe",
@@ -61,7 +63,10 @@ class TeachWindow(QMainWindow):
         super().__init__(parent)
         self.setWindowTitle("Vision Inspection — Teach")
         self._user_id = user_id
-        self._reference = reference_image
+        # bank of captured product images; teach on one, test across all
+        self._bank = list(reference_images) if reference_images else [reference_image]
+        self._reference_index = 0
+        self._reference = self._bank[0]
         self._sf = session_factory
         self._model = TeachModel(product, recipe_id)
         self._saved_recipe_id: int | None = None
@@ -83,8 +88,26 @@ class TeachWindow(QMainWindow):
         self._guide.setWordWrap(True)
         self._guide.setStyleSheet("padding:6px; background:#eef; border:1px solid #99c")
 
+        # filmstrip: step through captured images, pick the reference, test all
+        self._img_label = QLabel()
+        prev_btn = QPushButton("◀ Prev")
+        prev_btn.clicked.connect(self._prev_image)
+        next_btn = QPushButton("Next ▶")
+        next_btn.clicked.connect(self._next_image)
+        test_all_btn = QPushButton("Test all images")
+        test_all_btn.clicked.connect(self._test_all)
+        film = QHBoxLayout()
+        film.addWidget(prev_btn)
+        film.addWidget(self._img_label)
+        film.addWidget(next_btn)
+        film.addStretch(1)
+        film.addWidget(test_all_btn)
+        film_widget = QWidget()
+        film_widget.setLayout(film)
+
         left = QVBoxLayout()
         left.addWidget(self._image, 1)
+        left.addWidget(film_widget)
         left.addWidget(self._guide)
         left_widget = QWidget()
         left_widget.setLayout(left)
@@ -160,7 +183,39 @@ class TeachWindow(QMainWindow):
 
         self._rebuild_tree()
         self._set_guide("Click <b>Read Code</b> or <b>Read Text</b>, then drag a box on the image.")
+        self._update_img_label()
         self._refresh_view()
+
+    # ---- captured-image bank (filmstrip) ----------------------------------
+    def _update_img_label(self) -> None:
+        self._img_label.setText(f"Image {self._reference_index + 1} / {len(self._bank)}")
+
+    def _set_reference_index(self, index: int) -> None:
+        if not self._bank:
+            return
+        self._reference_index = index % len(self._bank)
+        self._reference = self._bank[self._reference_index]
+        self._last_results = None
+        self._update_img_label()
+        self._refresh_view()
+
+    def _prev_image(self) -> None:
+        self._set_reference_index(self._reference_index - 1)
+
+    def _next_image(self) -> None:
+        self._set_reference_index(self._reference_index + 1)
+
+    def _test_all(self) -> None:
+        """Run the recipe over every captured image — a statistical check before
+        the recipe goes live."""
+        total = passed = 0
+        for image in self._bank:
+            for r in self._model.test(image):
+                total += 1
+                passed += int(r.passed)
+        self._status.setText(
+            f"Tested {len(self._bank)} captured image(s): {passed}/{total} products passed"
+        )
 
     # ---- property panels --------------------------------------------------
     def _build_product_props(self) -> QWidget:
@@ -169,9 +224,15 @@ class TeachWindow(QMainWindow):
         self._p_lane = QComboBox()
         self._p_lane.addItems(self._lanes)
         self._p_lane.currentTextChanged.connect(self._product_edited)
+        self._p_logic = QComboBox()
+        self._p_logic.addItem("All inspections pass", "all")
+        self._p_logic.addItem("Any inspection passes", "any")
+        self._p_logic.setToolTip("PASS rule over this product's required inspections.")
+        self._p_logic.currentTextChanged.connect(self._product_edited)
         form = QFormLayout()
         form.addRow("Name", self._p_name)
         form.addRow("Reject lane", self._p_lane)
+        form.addRow("Pass when", self._p_logic)
         w = QWidget()
         w.setLayout(form)
         w.hide()
@@ -199,6 +260,10 @@ class TeachWindow(QMainWindow):
             self._t_rotation.addItem(f"{deg}°", deg)
         self._t_rotation.setToolTip("Rotate the box before reading (for sideways print).")
         self._t_rotation.currentTextChanged.connect(self._tool_edited)
+        self._t_required = QCheckBox("Required (fails the product if this fails)")
+        self._t_required.setChecked(True)
+        self._t_required.setToolTip("Uncheck to make this inspection informational only.")
+        self._t_required.stateChanged.connect(self._tool_edited)
         form = QFormLayout()
         form.addRow("Name", self._t_name)
         form.addRow("Type", self._t_type)
@@ -206,6 +271,7 @@ class TeachWindow(QMainWindow):
         form.addRow("Value", self._t_value)
         form.addRow("Batch field", self._t_field)
         form.addRow("Rotation", self._t_rotation)
+        form.addRow("", self._t_required)
         w = QWidget()
         w.setLayout(form)
         w.hide()
@@ -313,6 +379,8 @@ class TeachWindow(QMainWindow):
             region = self._model.regions[self._selected[1]]
             self._p_name.setText(region.name)
             self._p_lane.setCurrentText(region.reject_output)
+            logic_index = self._p_logic.findData(getattr(region, "pass_logic", "all"))
+            self._p_logic.setCurrentIndex(logic_index if logic_index >= 0 else 0)
             self._product_props.show()
             self._tool_props.hide()
         else:
@@ -330,6 +398,7 @@ class TeachWindow(QMainWindow):
             self._t_rotation.setCurrentIndex(rotation_index if rotation_index >= 0 else 0)
             field_index = self._t_field.findData(info["field"])
             self._t_field.setCurrentIndex(field_index if field_index >= 0 else 0)
+            self._t_required.setChecked(tool.config.get("required", True))
             self._sync_tool_inputs(info["mode"])
             self._product_props.hide()
             self._tool_props.show()
@@ -347,6 +416,7 @@ class TeachWindow(QMainWindow):
         region = self._model.regions[self._selected[1]]
         region.name = self._p_name.text()
         region.reject_output = self._p_lane.currentText()
+        region.pass_logic = self._p_logic.currentData() or "all"
         item = self._tree.currentItem()  # update label in place (no cursor reset)
         if item is not None:
             item.setText(0, f"{region.name}  →  {region.reject_output}")
@@ -360,13 +430,16 @@ class TeachWindow(QMainWindow):
         tool = region.tools[self._selected[2]]
         tool.tool_id = self._t_name.text()
         mode = self._t_mode.currentText() or modes_for(tool.tool_type)[0]
-        tool.config = build_config(
+        cfg = build_config(
             tool.tool_type,
             mode,
             self._t_value.text().strip(),
             rotation=self._t_rotation.currentData() or 0,
             field=self._t_field.currentData() or "",
         )
+        if not self._t_required.isChecked():
+            cfg["required"] = False
+        tool.config = cfg
         self._t_value.setPlaceholderText(value_hint(tool.tool_type, mode))
         self._sync_tool_inputs(mode)
         item = self._tree.currentItem()

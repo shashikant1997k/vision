@@ -270,6 +270,9 @@ class TeachWindow(QMainWindow):
         self._t_required.setChecked(True)
         self._t_required.setToolTip("Uncheck to make this inspection informational only.")
         self._t_required.stateChanged.connect(self._tool_edited)
+        self._t_lastread = QLabel("")
+        self._t_lastread.setWordWrap(True)
+        self._t_lastread.setStyleSheet("color:#225; font-weight:bold")
         form = QFormLayout()
         form.addRow("Name", self._t_name)
         form.addRow("Type", self._t_type)
@@ -278,6 +281,7 @@ class TeachWindow(QMainWindow):
         form.addRow("Batch field", self._t_field)
         form.addRow("Rotation", self._t_rotation)
         form.addRow("", self._t_required)
+        form.addRow("Last read", self._t_lastread)
         w = QWidget()
         w.setLayout(form)
         w.hide()
@@ -375,6 +379,14 @@ class TeachWindow(QMainWindow):
                 tool_result[(r.region_id, tr.tool_id)] = tr
         return region_pass, tool_result
 
+    def _last_read_for(self, region_id, tool_id) -> str:
+        for rr in self._last_results or []:
+            if rr.region_id == region_id:
+                for tr in rr.tool_results:
+                    if tr.tool_id == tool_id:
+                        return _disp(tr.measured_value) or "(nothing read)"
+        return ""
+
     def _rebuild_tree(self) -> None:
         green = QBrush(QColor(0, 140, 0))
         red = QBrush(QColor(200, 0, 0))
@@ -395,7 +407,7 @@ class TeachWindow(QMainWindow):
                 res = tool_result.get((region.region_id, tool.tool_id))
                 if res is not None:
                     read = _disp(res.measured_value) or "(no read)"
-                    tlabel += f"   {'✓' if res.passed else '✗'}  read “{read[:24]}”"
+                    tlabel += f"   {'✓' if res.passed else '✗'}  read “{read[:40]}”"
                 child = QTreeWidgetItem([tlabel])
                 child.setData(0, Qt.UserRole, ("tool", r, t))
                 if res is not None:
@@ -459,6 +471,7 @@ class TeachWindow(QMainWindow):
             field_index = self._t_field.findData(info["field"])
             self._t_field.setCurrentIndex(field_index if field_index >= 0 else 0)
             self._t_required.setChecked(tool.config.get("required", True))
+            self._t_lastread.setText(self._last_read_for(region.region_id, tool.tool_id))
             self._sync_tool_inputs(info["mode"])
             self._product_props.hide()
             self._tool_props.show()
@@ -574,7 +587,7 @@ class TeachWindow(QMainWindow):
                         detail = f" — expected {_disp(tr.expected_value)!r}"
                     else:
                         detail = " — not matched"
-                lines.append(f"   {mark} {tr.tool_id}: read “{read[:30]}”{detail}")
+                lines.append(f"   {mark} {tr.tool_id}: read “{read}”{detail}")
         return "\n".join(lines)
 
     def _save(self) -> None:

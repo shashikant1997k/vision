@@ -33,9 +33,31 @@ def _engine():
     return _ENGINE
 
 
+def _pad(image, border: int):
+    import numpy as np
+
+    arr = np.asarray(image)
+    if arr.ndim == 2:
+        arr = np.stack([arr] * 3, axis=2)
+    arr = arr[..., :3]
+    h, w = arr.shape[:2]
+    out = np.full((h + 2 * border, w + 2 * border, 3), 255, dtype=np.uint8)
+    out[border : border + h, border : border + w] = arr
+    return out
+
+
 def recognize(roi_image) -> tuple[str, float]:
-    """Return (text, mean_confidence) for a cropped ROI image."""
-    result, _ = _engine()(roi_image)
+    """Return (text, mean_confidence) for a cropped ROI image. Pads the crop so
+    the detector has margin, and falls back to whole-crop recognition (so a tight
+    single-line box still reads)."""
+    engine = _engine()
+    image = _pad(roi_image, 20)
+    result, _ = engine(image)
+    if not result:
+        try:
+            result, _ = engine(image, use_det=False, use_rec=True)
+        except Exception:
+            result = None
     if not result:
         return "", 0.0
     texts = [item[1] for item in result]
@@ -73,6 +95,15 @@ class OcrTextTool(InspectionTool):
 
         roi = rotate_image(roi_image, self.config.get("rotation", 0))
         text, score = recognize(roi)
+        if not text:
+            # auto-recover sideways print: try the other 90° orientations
+            best = ("", 0.0)
+            for extra in (90, 180, 270):
+                t2, s2 = recognize(rotate_image(roi, extra))
+                if t2 and s2 > best[1]:
+                    best = (t2, s2)
+            if best[0]:
+                text, score = best
         measured = _normalize(text, self.config)
         mode = self.config.get("match", "exact")
         expected = self.config.get("expected")

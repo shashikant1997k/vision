@@ -97,7 +97,9 @@ tests/
 ├── test_assembler.py   # load-station-run-batch: results→batch, camera assignment, frame archive
 ├── test_hmi.py         # HMI smoke (offscreen): image conv, login, live-view counts
 ├── test_teach.py       # teach model build/test/save + teach window smoke
-└── test_settings_screen.py # camera settings form, focus readout, calibration, save
+├── test_settings_screen.py # camera settings form, focus readout, calibration, save
+├── test_recipe_load.py # RecipeRepository.list_approved + load (round-trip)
+└── test_live_batch.py  # live window: select recipe, run as batch, results bound
 ```
 
 ## The seams (where real implementations drop in)

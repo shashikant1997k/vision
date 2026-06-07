@@ -2,15 +2,20 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
+    QComboBox,
+    QDialog,
+    QFormLayout,
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMainWindow,
     QPushButton,
     QVBoxLayout,
     QWidget,
 )
 
+from ..common.events import EventBus
 from ..engine.pool import SyncPool
 from ..io import RejectController, RejectOutputConfig, SimulatedIO
 from ..runtime import InspectionRunner, LiveStats, LiveView, draw_overlay
@@ -43,9 +48,25 @@ class MainWindow(QMainWindow):
         self._sf = session_factory
         self._user_id = user_id
         self._teach_window = None
+        self._settings_window = None
         self._runner: InspectionRunner | None = None
+        self._batch_id: int | None = None
         self._stats = LiveStats()
         self._live = LiveView()
+
+        # recipe selector: built-in demo + any approved recipes from the DB
+        self._recipe_combo = QComboBox()
+        self._recipe_combo.addItem("Demo (built-in)", None)
+        if session_factory is not None:
+            from ..db.store import RecipeRepository
+
+            for rid, name, version in RecipeRepository(session_factory).list_approved():
+                self._recipe_combo.addItem(f"{name} v{version}", rid)
+        self._batch_no = QLineEdit()
+        self._batch_no.setPlaceholderText("batch no. (optional)")
+        self._close_batch = QPushButton("Close batch")
+        self._close_batch.setEnabled(False)
+        self._close_batch.clicked.connect(self.close_batch)
 
         self._image = QLabel("No camera running")
         self._image.setAlignment(Qt.AlignCenter)
@@ -82,10 +103,16 @@ class MainWindow(QMainWindow):
         buttons.addWidget(self._teach)
         buttons.addWidget(self._settings)
 
+        job_form = QFormLayout()
+        job_form.addRow("Recipe", self._recipe_combo)
+        job_form.addRow("Batch", self._batch_no)
+
         side = QVBoxLayout()
+        side.addLayout(job_form)
         side.addLayout(counters)
         side.addStretch(1)
         side.addLayout(buttons)
+        side.addWidget(self._close_batch)
         side_widget = QWidget()
         side_widget.setLayout(side)
 
@@ -102,9 +129,36 @@ class MainWindow(QMainWindow):
         self._timer.setInterval(100)
         self._timer.timeout.connect(self._refresh)
 
+    def _resolve_recipe(self):
+        """Return (domain_recipe, recipe_db_id|None) for the selected recipe."""
+        recipe_db_id = self._recipe_combo.currentData()
+        if recipe_db_id is None or self._sf is None:
+            return self._recipe, None
+        from ..db.store import RecipeRepository
+
+        return RecipeRepository(self._sf).load(recipe_db_id), recipe_db_id
+
     def start(self) -> None:
         if self._runner is not None:
             return
+        self._recipe, recipe_db_id = self._resolve_recipe()
+        bus = EventBus()
+
+        # start a batch if a saved recipe + batch number + DB are available
+        if self._sf is not None and recipe_db_id is not None and self._batch_no.text().strip():
+            from ..db.batches import BatchService
+            from ..db.store import ResultStore
+
+            try:
+                self._batch_id = BatchService(self._sf).start(
+                    recipe_db_id, self._batch_no.text().strip(), self._user_id
+                )
+            except Exception as exc:
+                self.statusBar().showMessage(f"Batch start failed: {exc}")
+                return
+            bus.subscribe("inspection.result", ResultStore(self._sf, batch_id=self._batch_id).on_result)
+            self._close_batch.setEnabled(True)
+
         source = self._camera_factory(self._camera_id, None, self._recipe)
         lanes = sorted({region.reject_output for region in self._recipe.regions})
         reject = RejectController(
@@ -114,6 +168,7 @@ class MainWindow(QMainWindow):
         self._runner = InspectionRunner(
             [(source, self._recipe)],
             SyncPool(),
+            bus=bus,
             stats=self._stats,
             live_view=self._live,
             reject_handler=reject,
@@ -122,7 +177,30 @@ class MainWindow(QMainWindow):
         self._timer.start()
         self._start.setEnabled(False)
         self._stop.setEnabled(True)
-        self.statusBar().showMessage("Running")
+        batch = f" — batch {self._batch_no.text().strip()}" if self._batch_id else ""
+        self.statusBar().showMessage(f"Running{batch}")
+
+    def close_batch(self) -> None:
+        if self._batch_id is None or self._sf is None:
+            return
+        from .approve_dialog import ApproveDialog
+
+        dialog = ApproveDialog(self)
+        dialog.setWindowTitle("Release batch — electronic signature")
+        if dialog.exec() != QDialog.Accepted:
+            return
+        from ..db.batches import BatchService
+
+        try:
+            BatchService(self._sf).close(
+                self._batch_id, self._user_id, dialog.password_value, dialog.meaning_value
+            )
+        except Exception as exc:
+            self.statusBar().showMessage(f"Batch release failed: {exc}")
+            return
+        self.statusBar().showMessage(f"Batch #{self._batch_id} released")
+        self._batch_id = None
+        self._close_batch.setEnabled(False)
 
     def stop(self) -> None:
         if self._runner is not None:

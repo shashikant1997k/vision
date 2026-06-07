@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from sqlalchemy import func, select
 
+from ..common.types import ROI
 from ..domain.entities import Recipe as DomainRecipe
+from ..domain.entities import Region as DomainRegion
+from ..domain.entities import ToolSpec
 from ..security.authz import Perm, require
 from .audit import AuditService
 from .models import (
@@ -161,6 +164,47 @@ class RecipeRepository:
             )
             s.commit()
             return recipe.id
+
+    def list_approved(self) -> list[tuple[int, str, int]]:
+        """Return (recipe_id, product_name, version) for all approved recipes."""
+        with self._sf() as s:
+            recipes = s.execute(
+                select(Recipe).where(Recipe.status == "approved").order_by(Recipe.id)
+            ).scalars().all()
+            out = []
+            for rec in recipes:
+                product = s.get(Product, rec.product_id)
+                out.append((rec.id, product.name if product else "?", rec.version))
+            return out
+
+    def load(self, recipe_id: int) -> DomainRecipe:
+        """Reconstruct a domain Recipe (regions + tools) from the database."""
+        with self._sf() as s:
+            rec = s.get(Recipe, recipe_id)
+            if rec is None:
+                raise ValueError(f"recipe {recipe_id} not found")
+            product = s.get(Product, rec.product_id)
+            regions = []
+            for region_row in sorted(rec.regions, key=lambda r: r.seq):
+                tools = [
+                    ToolSpec(t.key, t.tool_type, ROI(**t.roi), dict(t.config or {}))
+                    for t in sorted(region_row.tools, key=lambda t: t.seq)
+                ]
+                regions.append(
+                    DomainRegion(
+                        region_row.key,
+                        region_row.name,
+                        ROI(**region_row.roi),
+                        region_row.reject_output,
+                        tools,
+                    )
+                )
+            return DomainRecipe(
+                recipe_id=product.code if product else str(recipe_id),
+                product=product.name if product else "",
+                version=rec.version,
+                regions=regions,
+            )
 
     def approve(
         self, recipe_id: int, user_id: int, password: str, meaning: str = "Approved"

@@ -23,6 +23,12 @@ The must-ship core that makes us credible and deployable on a real pharma line.
 - [ ] Presence/absence + pattern-match fixturing (locate-then-inspect).
 - [ ] Per-tool tolerances + AND/OR pass/fail logic.
 
+### HMI (Qt desktop — the line UI, D-015)
+- [x] Login screen (authenticates via UserService) — *done*.
+- [x] Live-view screen: annotated camera feed + running counters + start/stop — *done*.
+- [ ] Teach screen (draw ROIs, configure tools, test, save recipe) — *next*.
+- [ ] Camera-settings & calibration screen; user/station admin screens.
+
 ### Recipe / product
 - [ ] Product = recipe (camera settings + **regions** + per-region tools + tolerances + pass/fail logic).
 - [ ] **Regions/tracks:** define N product positions in a camera FOV; each region maps to a reject lane.

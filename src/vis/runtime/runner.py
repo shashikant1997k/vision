@@ -78,6 +78,9 @@ class InspectionRunner:
             thread.start()
         return self
 
+    def is_running(self) -> bool:
+        return any(t.is_alive() for t in self._threads)
+
     def stop(self) -> None:
         self._stop.set()
 

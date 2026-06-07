@@ -62,6 +62,11 @@ src/vis/
 │   ├── reject.py    # RejectHandler — reject routing / ejector I/O seam
 │   ├── assembler.py # RuntimeAssembler — build a live runner from persisted station config
 │   └── archive.py   # FrameArchiver — image-retention policy → FrameCapture rows
+├── hmi/             # Qt desktop HMI — the line operator UI (PySide6, D-015)
+│   ├── login.py     # LoginDialog (authenticates via UserService)
+│   ├── main_window.py # MainWindow — live view (annotated feed + counters + start/stop)
+│   ├── image.py     # numpy frame -> QPixmap
+│   └── app.py       # entry point (vis-hmi)
 ├── reporting/
 │   └── batch_report.py # compute_summary + CSV export + signed HTML batch report
 └── cli.py           # demo recipes + entrypoint (--source/--tcp-server/--db/--cameras/--station)
@@ -84,7 +89,8 @@ tests/
 ├── test_auth.py        # password hashing/policy, authenticate, lockout, permissions
 ├── test_batch.py       # batch start/close, results→batch, signed report, audit
 ├── test_stations.py    # camera-settings + reject-output config persistence, RBAC, audit
-└── test_assembler.py   # load-station-run-batch: results→batch, camera assignment, frame archive
+├── test_assembler.py   # load-station-run-batch: results→batch, camera assignment, frame archive
+└── test_hmi.py         # HMI smoke (offscreen): image conv, login, live-view counts
 ```
 
 ## The seams (where real implementations drop in)

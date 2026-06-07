@@ -212,3 +212,34 @@ class ModelVersion(Base):
     sha256: Mapped[str] = mapped_column(String(64))
     validated: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[str] = mapped_column(String(40), default=_utcnow_iso)
+
+
+# --- station / hardware config ------------------------------------------------
+class Station(Base):
+    __tablename__ = "stations"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(64), unique=True)
+    line: Mapped[str] = mapped_column(String(64), default="")
+    created_at: Mapped[str] = mapped_column(String(40), default=_utcnow_iso)
+
+
+class CameraRow(Base):
+    __tablename__ = "cameras"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    station_id: Mapped[int] = mapped_column(ForeignKey("stations.id"))
+    name: Mapped[str] = mapped_column(String(64))
+    identifier: Mapped[str] = mapped_column(String(128), default="")  # IP / serial
+    vendor: Mapped[str] = mapped_column(String(64), default="")
+    model: Mapped[str] = mapped_column(String(64), default="")
+    interface: Mapped[str] = mapped_column(String(32), default="GigE Vision")
+    settings: Mapped[dict] = mapped_column(JSONType, default=dict)  # CameraSettings.to_dict()
+
+
+class RejectOutputRow(Base):
+    __tablename__ = "reject_outputs"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    station_id: Mapped[int] = mapped_column(ForeignKey("stations.id"))
+    name: Mapped[str] = mapped_column(String(64))  # lane name (== region.reject_output)
+    channel: Mapped[int] = mapped_column(Integer)
+    eject_delay_ms: Mapped[int] = mapped_column(Integer, default=0)
+    pulse_ms: Mapped[int] = mapped_column(Integer, default=100)

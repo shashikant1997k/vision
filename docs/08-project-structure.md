@@ -49,6 +49,7 @@ src/vis/
 │   ├── audit.py     # AuditService — append-only, hash-chained, tamper-evident
 │   ├── users.py     # UserService — create/authenticate (lockout) + verify_user (e-sign re-auth)
 │   ├── batches.py   # BatchService — start (approved recipe) + close (release e-signature)
+│   ├── stations.py  # StationRepository — station/camera/reject-output config (RBAC+audited)
 │   └── store.py     # ResultStore (persist results) + RecipeRepository (RBAC + e-sign + audited)
 ├── runtime/         # live run loop (acquisition → pool → reject)
 │   ├── runner.py    # InspectionRunner — one acquisition thread per camera
@@ -74,7 +75,8 @@ tests/
 ├── test_audit.py       # audit hash-chain validity + tamper detection
 ├── test_persistence.py # results persisted; recipe save/approve audited + RBAC-gated
 ├── test_auth.py        # password hashing/policy, authenticate, lockout, permissions
-└── test_batch.py       # batch start/close, results→batch, signed report, audit
+├── test_batch.py       # batch start/close, results→batch, signed report, audit
+└── test_stations.py    # camera-settings + reject-output config persistence, RBAC, audit
 ```
 
 ## The seams (where real implementations drop in)

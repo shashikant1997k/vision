@@ -11,6 +11,7 @@ class Perm:
     RECIPE_CREATE = "recipe.create"
     RECIPE_APPROVE = "recipe.approve"
     BATCH_MANAGE = "batch.manage"
+    STATION_MANAGE = "station.manage"  # configure hardware (cameras, reject outputs)
     USER_MANAGE = "user.manage"
     AUDIT_VIEW = "audit.view"
 
@@ -21,11 +22,12 @@ DEFAULT_ROLES: dict[str, list[str]] = {
         Perm.RECIPE_CREATE,
         Perm.RECIPE_APPROVE,
         Perm.BATCH_MANAGE,
+        Perm.STATION_MANAGE,
         Perm.USER_MANAGE,
         Perm.AUDIT_VIEW,
     ],
     "qa_manager": [Perm.RECIPE_CREATE, Perm.RECIPE_APPROVE, Perm.BATCH_MANAGE, Perm.AUDIT_VIEW],
-    "engineer": [Perm.RECIPE_CREATE, Perm.BATCH_MANAGE],
+    "engineer": [Perm.RECIPE_CREATE, Perm.BATCH_MANAGE, Perm.STATION_MANAGE],
     "operator": [Perm.BATCH_MANAGE],
 }
 

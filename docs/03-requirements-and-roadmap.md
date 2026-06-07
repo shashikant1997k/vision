@@ -11,7 +11,7 @@ The must-ship core that makes us credible and deployable on a real pharma line.
 - [ ] Hardware / encoder trigger; software trigger for setup.
 - [x] Camera controls: exposure, gain, white balance, ROI, frame rate, packet size — *done (CameraSettings model + GenICam apply); hardware apply runs on Windows*.
 - [x] Basic calibration (pixel ↔ mm) — *done (Calibration; distortion model TODO)*.
-- [x] Live mode with running pass/fail/reject counters per camera — *done (InspectionRunner + LiveStats); on-screen overlays are HMI-side (pending)*.
+- [x] Live mode with running pass/fail/reject counters per camera + **result overlays** — *done (InspectionRunner + LiveStats + draw_overlay: ROI boxes, pass/fail color, read values, grade)*.
 - [x] **Multi-product-in-one-FOV (track-to-region mapping):** N products per frame, each its own Region with its own ROIs/tools and pass/fail — *done*.
 - [x] **Per-region reject routing** to the correct lane/output — *done (RejectHandler); real digital-I/O ejector + eject timing pending (Windows)*.
 

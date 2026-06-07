@@ -34,6 +34,7 @@ class InspectionRunner:
         stats: LiveStats | None = None,
         live_view: LiveView | None = None,
         reject_handler: RejectHandler | None = None,
+        on_frame=None,  # optional callback(frame, results) per processed frame
     ) -> None:
         self.assignments = list(assignments)
         self.pool = pool
@@ -41,6 +42,7 @@ class InspectionRunner:
         self.stats = stats or LiveStats()
         self.live_view = live_view or LiveView()
         self.reject_handler = reject_handler
+        self.on_frame = on_frame
         self._threads: list[Thread] = []
         self._stop = Event()
 
@@ -55,6 +57,8 @@ class InspectionRunner:
                     self.stats.record(r)
                     if not r.passed and self.reject_handler is not None:
                         self.reject_handler.reject(r)
+                if self.on_frame is not None:
+                    self.on_frame(frame, results)
         finally:
             close = getattr(camera, "close", None)
             if callable(close):

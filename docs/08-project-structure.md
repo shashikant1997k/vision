@@ -51,6 +51,7 @@ src/vis/
 │   ├── runner.py    # InspectionRunner — one acquisition thread per camera
 │   ├── stats.py     # LiveStats — thread-safe per-camera + total counters
 │   ├── live_view.py # LiveView — latest frame + results per camera (for the HMI)
+│   ├── overlay.py   # draw_overlay — annotate frame with ROI boxes + results (HMI view)
 │   └── reject.py    # RejectHandler — reject routing / ejector I/O seam
 ├── reporting/
 │   └── batch_report.py # compute_summary + CSV export + signed HTML batch report
@@ -64,6 +65,7 @@ tests/
 ├── test_ocr.py         # real OCR text read + match/regex + pipeline
 ├── test_camera.py      # camera settings/trigger, FileCamera replay, manager, calibration
 ├── test_runtime.py     # multi-camera live loop, per-camera stats, reject routing
+├── test_overlay.py     # annotated-frame rendering (pass green / reject red)
 ├── test_sim.py         # simulated code line, multi-product
 ├── test_audit.py       # audit hash-chain validity + tamper detection
 ├── test_persistence.py # results persisted; recipe save/approve audited + RBAC-gated

@@ -119,6 +119,11 @@ def main() -> None:
         help="if set (e.g. sqlite:///run.db), persist inspection results to this DB",
     )
     parser.add_argument("--cameras", type=int, default=1, help="number of cameras to run")
+    parser.add_argument(
+        "--save-overlays",
+        default="",
+        help="if set, write annotated frames (ROI boxes + results) to this directory",
+    )
     args = parser.parse_args()
 
     if args.source == "ocr":
@@ -176,9 +181,28 @@ def main() -> None:
 
     bus.subscribe("inspection.result", _print_result)
 
+    on_frame = None
+    if args.save_overlays:
+        import os
+
+        from PIL import Image
+
+        from .runtime import draw_overlay
+
+        os.makedirs(args.save_overlays, exist_ok=True)
+
+        def on_frame(frame, results):
+            annotated = draw_overlay(frame.image, recipe, results)
+            path = os.path.join(args.save_overlays, f"{frame.camera_id}_f{frame.frame_id:03d}.png")
+            Image.fromarray(annotated).save(path)
+
     reject_handler = RecordingRejectHandler()
     runner = InspectionRunner(
-        [(c, recipe) for c in cameras], pool, bus=bus, reject_handler=reject_handler
+        [(c, recipe) for c in cameras],
+        pool,
+        bus=bus,
+        reject_handler=reject_handler,
+        on_frame=on_frame,
     )
     print(f"running {len(cameras)} camera(s), source={args.source}...")
     stats = runner.run()

@@ -47,7 +47,9 @@ driver (structure), manager, calibration. Verified: FileCamera replays through t
 live pipeline; manager lifecycle; calibration math; GenICam fails with a clear
 message when the driver/producer is absent.
 
-Next camera-module work: live-mode latest-frame buffer for display; per-camera
-acquisition processes wired to the worker pool; camera discovery/enumeration;
-lighting/strobe control; focus-assist; on the Windows box — the real GenICam grab
-+ encoder-to-reject latency spike (D-011).
+Also done: live-mode (runtime loop + LiveView + overlays), camera
+discovery/enumeration (`discovery.py`), and lighting/strobe control
+(`lighting.py`).
+
+Next camera-module work: focus-assist; on the Windows box — the real GenICam grab
++ encoder-to-reject latency spike (D-011); persist lighting config on the station.

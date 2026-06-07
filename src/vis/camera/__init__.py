@@ -14,18 +14,28 @@ testable on macOS via the file/simulation sources behind the same interface.
 
 from .calibration import Calibration
 from .device import CameraDevice, CameraInfo
+from .discovery import CameraDiscovery, HarvesterDiscovery, StaticDiscovery
 from .file_source import FileCamera
+from .lighting import DigitalIOLight, LightController, LightMode, LightSettings, SimulatedLightController
 from .manager import CameraManager
 from .settings import CameraSettings, SensorROI, TriggerConfig, TriggerMode
 
 __all__ = [
     "Calibration",
     "CameraDevice",
+    "CameraDiscovery",
     "CameraInfo",
     "CameraManager",
     "CameraSettings",
+    "DigitalIOLight",
     "FileCamera",
+    "HarvesterDiscovery",
+    "LightController",
+    "LightMode",
+    "LightSettings",
     "SensorROI",
+    "SimulatedLightController",
+    "StaticDiscovery",
     "TriggerConfig",
     "TriggerMode",
 ]

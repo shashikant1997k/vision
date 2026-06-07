@@ -39,6 +39,8 @@ src/vis/
 │   ├── file_source.py # FileCamera — replay images from disk (dev/test on macOS)
 │   ├── genicam.py   # HarvesterCamera — real GigE Vision/GenICam driver (Windows)
 │   ├── manager.py   # CameraManager — multi-camera lifecycle
+│   ├── discovery.py # CameraDiscovery — StaticDiscovery + HarvesterDiscovery (enumerate GigE)
+│   ├── lighting.py  # LightController — strobe/continuous; SimulatedLight + DigitalIOLight
 │   └── calibration.py # pixel <-> mm
 ├── security/        # auth + RBAC (Part 11 access control)
 │   ├── passwords.py # PBKDF2-HMAC-SHA256 hashing + PasswordPolicy (stdlib, no native deps)
@@ -71,6 +73,7 @@ tests/
 ├── test_ocr.py         # real OCR text read + match/regex + pipeline
 ├── test_camera.py      # camera settings/trigger, FileCamera replay, manager, calibration
 ├── test_runtime.py     # multi-camera live loop, per-camera stats, reject routing
+├── test_discovery_lighting.py # camera discovery + lighting/strobe control
 ├── test_overlay.py     # annotated-frame rendering (pass green / reject red)
 ├── test_reject_io.py   # digital I/O pulses, reject controller, ejector lane routing
 ├── test_sim.py         # simulated code line, multi-product

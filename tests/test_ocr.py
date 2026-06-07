@@ -51,6 +51,18 @@ def test_ocr_sideways_multiword_auto_orients_and_orders():
     assert "102025" in result.measured_value.replace(" ", "")
 
 
+def test_ocr_matching_tolerates_spaces_and_punctuation():
+    from vis.tools.ocr import _match_key
+
+    # a '.'/',' slip, a missing dot, or extra spaces must not fail the match
+    assert _match_key("MFG, 10/2025") == _match_key("MFG. 10/2025")
+    assert _match_key("EXP 10/2026") == _match_key("EXP. 10/2026")
+    assert _match_key("B.NO.  TEST12345") == _match_key("B.NO. TEST12345")
+    # exact match passes despite a punctuation difference in the print
+    tool = build_tool("ocv_text", "mfg", {"expected": "MFG. 10/2025", "uppercase": True})
+    assert tool.inspect(_img("MFG, 10/2025")).passed
+
+
 def test_ocr_regex_validates_date_format():
     tool = build_tool("ocv_text", "exp", {"match": "regex", "pattern": r"\d{4}/\d{2}"})
     assert tool.inspect(_img("2026/06")).passed

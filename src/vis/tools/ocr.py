@@ -46,6 +46,29 @@ def _pad(image, border: int):
     return out
 
 
+def _prepare(image):
+    """Pad + upscale a small ROI so PP-OCR reads small text/punctuation better."""
+    import numpy as np
+
+    arr = _pad(image, 20)
+    h = arr.shape[0]
+    target = 64
+    if 0 < h < target:
+        from PIL import Image
+
+        factor = min(4.0, target / h)
+        size = (max(1, int(arr.shape[1] * factor)), max(1, int(h * factor)))
+        arr = np.array(Image.fromarray(arr).resize(size, Image.LANCZOS), dtype=np.uint8)
+    return arr
+
+
+def _match_key(s: str) -> str:
+    """Comparison key: upper-case alphanumerics only (spaces + punctuation
+    ignored), so a '.'/',' OCR slip or a missing dot does not cause a false
+    reject. The raw read (with punctuation) is still shown to the operator."""
+    return "".join(ch for ch in (s or "").upper() if ch.isalnum())
+
+
 def _reading_order(result):
     """Sort detected text boxes into reading order: cluster boxes into lines by
     vertical position, then order each line left-to-right (RapidOCR doesn't
@@ -83,7 +106,7 @@ def recognize(roi_image) -> tuple[str, float]:
     the detector has margin, reads pieces in reading order, and falls back to
     whole-crop recognition (so a tight single-line box still reads)."""
     engine = _engine()
-    image = _pad(roi_image, 20)
+    image = _prepare(roi_image)
     result, _ = engine(image)
     if not result:
         try:
@@ -101,6 +124,7 @@ def recognize(roi_image) -> tuple[str, float]:
 def _normalize(text: str, config: dict) -> str:
     if config.get("strip", True):
         text = text.strip()
+    text = " ".join(text.split())  # collapse runs of whitespace
     if config.get("uppercase", False):
         text = text.upper()
     if config.get("ignore_spaces", False):
@@ -145,26 +169,28 @@ class OcrTextTool(InspectionTool):
                 if _metric(t2, s2) > best:
                     best_text, best_score, best = t2, s2, _metric(t2, s2)
             text, score = best_text, best_score
+        # `measured` is the raw read shown to the operator (keeps punctuation);
+        # matching is done on alphanumeric keys so a '.'/',' OCR slip, a missing
+        # dot, or extra spaces never causes a false reject.
         measured = _normalize(text, self.config)
         mode = self.config.get("match", "exact")
         expected = self.config.get("expected")
-        if expected is not None and self.config.get("uppercase"):
-            expected = expected.upper()
 
         if mode == "regex":
             pattern = self.config.get("pattern", "")
             passed = bool(re.fullmatch(pattern, measured))
             expected_display = pattern
-        elif mode == "contains":
-            passed = bool(expected) and expected in measured
-            expected_display = expected
         elif mode == "batch_field":
             # unresolved batch field (e.g. during teach Test): pass if any text read.
             # At batch run the recipe is resolved to a concrete contains-match.
-            passed = bool(measured)
+            passed = bool(_match_key(measured))
             expected_display = f"[batch field: {self.config.get('field', '')}]"
-        else:
-            passed = measured == expected
+        elif mode == "contains":
+            key_e = _match_key(expected or "")
+            passed = bool(key_e) and key_e in _match_key(measured)
+            expected_display = expected
+        else:  # exact
+            passed = _match_key(measured) == _match_key(expected or "")
             expected_display = expected
 
         if score < float(self.config.get("min_confidence", 0.0)):

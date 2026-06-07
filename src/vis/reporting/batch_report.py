@@ -3,6 +3,8 @@ from __future__ import annotations
 import csv
 import html
 import io
+import os
+from pathlib import Path
 
 from sqlalchemy import select
 
@@ -104,6 +106,27 @@ def to_csv(session, batch_id: int) -> str:
                 ]
             )
     return buf.getvalue()
+
+
+def write_batch_report(session_factory, batch_id: int, directory: str) -> tuple[str, str]:
+    """Write the signed HTML report + CSV export for a batch. Returns the paths."""
+    os.makedirs(directory, exist_ok=True)
+    with session_factory() as s:
+        summary = compute_summary(s, batch_id)
+        signature = get_release_signature(s, batch_id)
+        signature_line = ""
+        if signature is not None:
+            signature_line = (
+                f"Released by user#{signature.user_id} — {signature.meaning} @ {signature.ts}"
+            )
+        html_text = to_html(summary, signature_line=signature_line)
+        csv_text = to_csv(s, batch_id)
+
+    html_path = os.path.join(directory, f"batch_{batch_id}.html")
+    csv_path = os.path.join(directory, f"batch_{batch_id}.csv")
+    Path(html_path).write_text(html_text, encoding="utf-8")
+    Path(csv_path).write_text(csv_text, encoding="utf-8")
+    return html_path, csv_path
 
 
 def to_html(summary: dict, signature_line: str = "") -> str:

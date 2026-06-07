@@ -29,7 +29,8 @@ The must-ship core that makes us credible and deployable on a real pharma line.
 - [x] Teach screen (interactive **drag-to-draw** ROIs, configure tools, test, save draft, **approve with e-signature**) — *done*.
 - [x] Camera-settings & calibration screen (exposure/gain/trigger + live focus-assist + pixel↔mm calibration; apply + save-to-station) — *done*.
 - [x] Recipe selector (run a saved **approved** recipe) + **batch start/close** (with release e-signature) from the live screen — *done*.
-- [ ] User/station admin screens; multi-camera tabs; report export from HMI.
+- [x] Report export from HMI — *done: closing a batch writes the signed HTML + CSV report*.
+- [ ] User/station admin screens; multi-camera tabs.
 
 ### Recipe / product
 - [ ] Product = recipe (camera settings + **regions** + per-region tools + tolerances + pass/fail logic).

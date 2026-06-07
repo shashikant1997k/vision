@@ -99,7 +99,8 @@ tests/
 ├── test_teach.py       # teach model build/test/save + teach window smoke
 ├── test_settings_screen.py # camera settings form, focus readout, calibration, save
 ├── test_recipe_load.py # RecipeRepository.list_approved + load (round-trip)
-└── test_live_batch.py  # live window: select recipe, run as batch, results bound
+├── test_live_batch.py  # live window: select recipe, run as batch, results bound
+└── test_report_export.py # write_batch_report -> signed HTML + CSV files
 ```
 
 ## The seams (where real implementations drop in)

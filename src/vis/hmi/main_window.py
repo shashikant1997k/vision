@@ -38,6 +38,7 @@ class MainWindow(QMainWindow):
         camera_id="cam1",
         session_factory=None,
         user_id=None,
+        report_dir="reports",
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -47,6 +48,7 @@ class MainWindow(QMainWindow):
         self._camera_id = camera_id
         self._sf = session_factory
         self._user_id = user_id
+        self._report_dir = report_dir
         self._teach_window = None
         self._settings_window = None
         self._runner: InspectionRunner | None = None
@@ -198,7 +200,15 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             self.statusBar().showMessage(f"Batch release failed: {exc}")
             return
-        self.statusBar().showMessage(f"Batch #{self._batch_id} released")
+
+        from ..reporting.batch_report import write_batch_report
+
+        released_id = self._batch_id
+        try:
+            html_path, _ = write_batch_report(self._sf, released_id, self._report_dir)
+            self.statusBar().showMessage(f"Batch #{released_id} released — report: {html_path}")
+        except Exception as exc:
+            self.statusBar().showMessage(f"Batch #{released_id} released; report failed: {exc}")
         self._batch_id = None
         self._close_batch.setEnabled(False)
 

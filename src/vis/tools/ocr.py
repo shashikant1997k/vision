@@ -20,11 +20,27 @@ from .registry import register
 _ENGINE = None
 
 
+def _default_model_dir():
+    """First directory that holds PP-OCRv4 det.onnx + rec.onnx, or None.
+    Looked up: $VIS_OCR_MODEL_DIR, ~/.vision-inspection/models/ppocrv4, repo models/."""
+    import os
+    from pathlib import Path
+
+    candidates = []
+    if os.environ.get("VIS_OCR_MODEL_DIR"):
+        candidates.append(Path(os.environ["VIS_OCR_MODEL_DIR"]))
+    candidates.append(Path.home() / ".vision-inspection" / "models" / "ppocrv4")
+    candidates.append(Path(__file__).resolve().parents[3] / "models" / "ppocrv4")
+    for directory in candidates:
+        if (directory / "det.onnx").exists() and (directory / "rec.onnx").exists():
+            return directory
+    return None
+
+
 def _engine():
-    """Lazily build the OCR engine. Model files are swappable via env vars
-    (VIS_OCR_DET_MODEL / VIS_OCR_REC_MODEL / VIS_OCR_CLS_MODEL) so a higher
-    accuracy recogniser (e.g. PP-OCRv4 ONNX) can be dropped in without code
-    changes — the bundled model is PP-OCRv3 mobile."""
+    """Lazily build the OCR engine. Prefers PP-OCRv4 models if present (much more
+    accurate than the bundled PP-OCRv3 mobile); falls back to the bundled model.
+    Override per-file with VIS_OCR_DET_MODEL / VIS_OCR_REC_MODEL / VIS_OCR_CLS_MODEL."""
     global _ENGINE
     if _ENGINE is None:
         import os
@@ -35,15 +51,21 @@ def _engine():
             raise RuntimeError(
                 "OCR engine not installed. Install it with: pip install '.[ocr]'"
             ) from exc
+        det = os.environ.get("VIS_OCR_DET_MODEL")
+        rec = os.environ.get("VIS_OCR_REC_MODEL")
+        cls = os.environ.get("VIS_OCR_CLS_MODEL")
+        if not (det and rec):
+            directory = _default_model_dir()
+            if directory is not None:
+                det = det or str(directory / "det.onnx")
+                rec = rec or str(directory / "rec.onnx")
         kwargs = {}
-        for env, key in (
-            ("VIS_OCR_DET_MODEL", "det_model_path"),
-            ("VIS_OCR_REC_MODEL", "rec_model_path"),
-            ("VIS_OCR_CLS_MODEL", "cls_model_path"),
-        ):
-            path = os.environ.get(env)
-            if path:
-                kwargs[key] = path
+        if det:
+            kwargs["det_model_path"] = det
+        if rec:
+            kwargs["rec_model_path"] = rec
+        if cls:
+            kwargs["cls_model_path"] = cls
         try:
             _ENGINE = RapidOCR(**kwargs) if kwargs else RapidOCR()
         except Exception:  # pragma: no cover - bad override path
@@ -74,8 +96,8 @@ def _prepare(image):
     """
     import numpy as np
 
-    arr = _pad(image, 16)
-    target = 160
+    arr = _pad(image, 6)  # small margin only — large padding splits detection
+    target = 140
     try:
         import cv2
 

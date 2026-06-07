@@ -26,3 +26,5 @@ oq-evidence.xml
 .DS_Store
 .idea/
 .vscode/
+models/ppocrv4/*.onnx
+*.onnx

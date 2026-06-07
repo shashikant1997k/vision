@@ -41,6 +41,7 @@ src/vis/
 │   ├── manager.py   # CameraManager — multi-camera lifecycle
 │   ├── discovery.py # CameraDiscovery — StaticDiscovery + HarvesterDiscovery (enumerate GigE)
 │   ├── lighting.py  # LightController — strobe/continuous; SimulatedLight + DigitalIOLight
+│   ├── focus.py     # focus_score + FocusAssist (variance-of-Laplacian sharpness)
 │   └── calibration.py # pixel <-> mm
 ├── security/        # auth + RBAC (Part 11 access control)
 │   ├── passwords.py # PBKDF2-HMAC-SHA256 hashing + PasswordPolicy (stdlib, no native deps)
@@ -63,7 +64,7 @@ src/vis/
 │   └── archive.py   # FrameArchiver — image-retention policy → FrameCapture rows
 ├── reporting/
 │   └── batch_report.py # compute_summary + CSV export + signed HTML batch report
-└── cli.py           # demo recipes + runnable entrypoint (--source, --tcp-server, --db)
+└── cli.py           # demo recipes + entrypoint (--source/--tcp-server/--db/--cameras/--station)
 alembic/             # PostgreSQL migration scaffolding (env.py wired to Base.metadata)
 tests/
 ├── test_tools.py       # tool interface + registry
@@ -74,6 +75,7 @@ tests/
 ├── test_camera.py      # camera settings/trigger, FileCamera replay, manager, calibration
 ├── test_runtime.py     # multi-camera live loop, per-camera stats, reject routing
 ├── test_discovery_lighting.py # camera discovery + lighting/strobe control
+├── test_focus.py       # focus-assist sharpness metric
 ├── test_overlay.py     # annotated-frame rendering (pass green / reject red)
 ├── test_reject_io.py   # digital I/O pulses, reject controller, ejector lane routing
 ├── test_sim.py         # simulated code line, multi-product

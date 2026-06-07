@@ -245,6 +245,15 @@ class RejectOutputRow(Base):
     pulse_ms: Mapped[int] = mapped_column(Integer, default=100)
 
 
+class LightOutputRow(Base):
+    __tablename__ = "light_outputs"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    station_id: Mapped[int] = mapped_column(ForeignKey("stations.id"))
+    name: Mapped[str] = mapped_column(String(64))
+    channel: Mapped[int] = mapped_column(Integer)
+    settings: Mapped[dict] = mapped_column(JSONType, default=dict)  # LightSettings.to_dict()
+
+
 class CameraAssignment(Base):
     """Binds a camera to the recipe it runs for a batch (multi-camera run)."""
 

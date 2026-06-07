@@ -92,6 +92,68 @@ def build_ocr_demo_recipe() -> Recipe:
     )
 
 
+def _run_from_station(args) -> None:
+    """Load a persisted station from the config DB and run a batch from it."""
+    from .common.events import EventBus
+    from .db.base import init_db, make_engine, make_session_factory
+    from .db.models import Batch
+    from .db.stations import StationRepository
+    from .engine.pool import ProcessPool, SyncPool
+    from .io import SimulatedIO
+    from .runtime.assembler import RuntimeAssembler
+
+    engine = make_engine(args.db)
+    init_db(engine)
+    sf = make_session_factory(engine)
+    repo = StationRepository(sf)
+    sid = repo.station_id_by_name(args.station)
+
+    recipe = build_ocr_demo_recipe() if args.source == "ocr" else build_code_demo_recipe()
+    cam_names = [name for _, name, _ in repo.cameras(sid)]
+    if not cam_names:
+        print(f"station {args.station!r} has no cameras configured")
+        return
+    configs = repo.reject_output_configs(sid)
+
+    with sf() as s:
+        batch = Batch(batch_no=args.batch_no or "RUN", status="open")
+        s.add(batch)
+        s.flush()
+        bid = batch.id
+        s.commit()
+
+    pool = ProcessPool(args.workers) if args.workers > 0 else SyncPool()
+    bus = EventBus()
+
+    def _printer(r):
+        status = "PASS" if r.passed else f"REJECT -> {r.reject_output}"
+        print(f"{r.camera_id} f{r.frame_id:>3}  {r.region_id}: {status}")
+
+    bus.subscribe("inspection.result", _printer)
+
+    io = SimulatedIO()
+
+    def factory(camera_id, settings, recipe_):
+        from .engine.sim import SimulatedCodeCamera
+
+        return SimulatedCodeCamera(
+            camera_id, recipe_, num_frames=args.frames, defect_rate=args.defect_rate, seed=0
+        )
+
+    assembler = RuntimeAssembler(sf, camera_factory=factory, reject_io=io)
+    runner = assembler.build_runner(
+        sid, [(name, recipe) for name in cam_names], pool, bus=bus, batch_id=bid
+    )
+    print(
+        f"running station {args.station!r}: cameras={cam_names}, "
+        f"lanes={[c.name for c in configs]} (all from DB), batch #{bid}"
+    )
+    stats = runner.run()
+    pool.close()
+    pulses = {c.name: io.pulse_count(c.channel) for c in configs}
+    print(f"\n[totals] {stats.totals()}; ejector pulses {pulses}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Walking-skeleton inspection demo")
     parser.add_argument("--frames", type=int, default=10)
@@ -123,11 +185,20 @@ def main() -> None:
         "--eject-delay-ms", type=int, default=0, help="inspection-to-ejector travel delay"
     )
     parser.add_argument(
+        "--station", default="", help="run from a persisted station (requires --db config DB)"
+    )
+    parser.add_argument("--batch-no", default="", help="batch number when running from a station")
+    parser.add_argument(
         "--save-overlays",
         default="",
         help="if set, write annotated frames (ROI boxes + results) to this directory",
     )
     args = parser.parse_args()
+
+    if args.station:
+        if not args.db:
+            parser.error("--station requires --db (the configuration database)")
+        return _run_from_station(args)
 
     if args.source == "ocr":
         recipe = build_ocr_demo_recipe()

@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from sqlalchemy import select
 
+from ..camera.lighting import LightSettings
 from ..camera.settings import CameraSettings
 from ..io.reject import RejectOutputConfig
 from ..security.authz import Perm, require
 from .audit import AuditService
-from .models import CameraRow, RejectOutputRow, Station
+from .models import CameraRow, LightOutputRow, RejectOutputRow, Station
 
 
 class StationRepository:
@@ -104,7 +105,62 @@ class StationRepository:
             s.commit()
             return row.id
 
+    def add_light(
+        self,
+        station_id: int,
+        name: str,
+        channel: int,
+        user_id: int,
+        settings: LightSettings | None = None,
+    ) -> int:
+        with self._sf() as s:
+            require(s, user_id, Perm.STATION_MANAGE)
+            row = LightOutputRow(
+                station_id=station_id,
+                name=name,
+                channel=channel,
+                settings=(settings or LightSettings()).to_dict(),
+            )
+            s.add(row)
+            s.flush()
+            AuditService(s).record(
+                "light.add", "light_output", row.id, user_id=user_id,
+                after={"name": name, "channel": channel},
+            )
+            s.commit()
+            return row.id
+
+    def update_light_settings(
+        self, light_id: int, settings: LightSettings, user_id: int
+    ) -> None:
+        with self._sf() as s:
+            require(s, user_id, Perm.STATION_MANAGE)
+            row = s.get(LightOutputRow, light_id)
+            if row is None:
+                raise ValueError(f"light {light_id} not found")
+            before = row.settings
+            row.settings = settings.to_dict()
+            AuditService(s).record(
+                "light.settings", "light_output", light_id, user_id=user_id,
+                before=before, after=row.settings,
+            )
+            s.commit()
+
     # --- bridges to the runtime (read) ----------------------------------------
+    def station_id_by_name(self, name: str) -> int:
+        with self._sf() as s:
+            station = s.execute(select(Station).where(Station.name == name)).scalars().first()
+            if station is None:
+                raise ValueError(f"station {name!r} not found")
+            return station.id
+
+    def lights(self, station_id: int) -> list[tuple[int, str, int, LightSettings]]:
+        with self._sf() as s:
+            rows = s.execute(
+                select(LightOutputRow).where(LightOutputRow.station_id == station_id)
+            ).scalars().all()
+            return [(r.id, r.name, r.channel, LightSettings.from_dict(r.settings)) for r in rows]
+
     def camera_settings(self, camera_id: int) -> CameraSettings:
         with self._sf() as s:
             camera = s.get(CameraRow, camera_id)

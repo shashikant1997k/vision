@@ -15,6 +15,7 @@ testable on macOS via the file/simulation sources behind the same interface.
 from .calibration import Calibration
 from .device import CameraDevice, CameraInfo
 from .discovery import CameraDiscovery, HarvesterDiscovery, StaticDiscovery
+from .focus import FocusAssist, focus_score
 from .file_source import FileCamera
 from .lighting import DigitalIOLight, LightController, LightMode, LightSettings, SimulatedLightController
 from .manager import CameraManager
@@ -29,7 +30,9 @@ __all__ = [
     "CameraSettings",
     "DigitalIOLight",
     "FileCamera",
+    "FocusAssist",
     "HarvesterDiscovery",
+    "focus_score",
     "LightController",
     "LightMode",
     "LightSettings",

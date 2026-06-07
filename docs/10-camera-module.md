@@ -51,5 +51,9 @@ Also done: live-mode (runtime loop + LiveView + overlays), camera
 discovery/enumeration (`discovery.py`), and lighting/strobe control
 (`lighting.py`).
 
-Next camera-module work: focus-assist; on the Windows box — the real GenICam grab
-+ encoder-to-reject latency spike (D-011); persist lighting config on the station.
+Also done: focus-assist (`focus.py`), lighting config persisted on the station
+(`StationRepository.add_light`/`lights`), and a run-from-station CLI
+(`vis.cli --db ... --station NAME` loads cameras + reject lanes from the DB).
+
+Next camera-module work: on the Windows box — the real GenICam grab +
+encoder-to-reject latency spike (D-011); apply persisted lighting at run start.

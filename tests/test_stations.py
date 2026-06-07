@@ -64,6 +64,39 @@ def test_persisted_reject_outputs_drive_the_controller(tmp_path):
     assert io.pulse_count(1) == 0
 
 
+def test_lighting_config_persist_and_update_audited(tmp_path):
+    from vis.camera import LightMode, LightSettings
+
+    sf, eng_id, _ = _setup(tmp_path)
+    repo = StationRepository(sf)
+    sid = repo.create_station("S1", user_id=eng_id)
+    lid = repo.add_light(
+        sid, "ringlight", channel=4, user_id=eng_id,
+        settings=LightSettings(mode=LightMode.STROBED, brightness=80, strobe_source="Line1"),
+    )
+    lights = repo.lights(sid)
+    assert len(lights) == 1
+    _, name, channel, settings = lights[0]
+    assert name == "ringlight" and channel == 4
+    assert settings.mode is LightMode.STROBED and settings.brightness == 80
+
+    repo.update_light_settings(lid, LightSettings(brightness=50), user_id=eng_id)
+    assert repo.lights(sid)[0][3].brightness == 50
+
+    with sf() as s:
+        ok, _ = AuditService(s).verify_chain()
+        assert ok
+
+
+def test_station_lookup_by_name(tmp_path):
+    sf, eng_id, _ = _setup(tmp_path)
+    repo = StationRepository(sf)
+    sid = repo.create_station("Line-7", user_id=eng_id)
+    assert repo.station_id_by_name("Line-7") == sid
+    with pytest.raises(ValueError):
+        repo.station_id_by_name("nope")
+
+
 def test_station_config_requires_permission(tmp_path):
     sf, _, op_id = _setup(tmp_path)
     repo = StationRepository(sf)

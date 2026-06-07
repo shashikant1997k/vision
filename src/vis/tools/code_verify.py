@@ -59,6 +59,16 @@ class CodeVerifyTool(InspectionTool):
             passed = False
             mismatches["_raw"] = {"expected": expected_data, "actual": decoded.text}
 
+        # Variable code: validate the decoded data against a regex pattern
+        # (e.g. a serial/date format) instead of a fixed value.
+        pattern = self.config.get("pattern")
+        if pattern:
+            import re
+
+            if not re.fullmatch(pattern, decoded.text):
+                passed = False
+                mismatches["_pattern"] = {"pattern": pattern, "actual": decoded.text}
+
         if mismatches:
             detail["mismatches"] = mismatches
 

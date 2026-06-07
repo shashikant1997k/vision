@@ -22,10 +22,17 @@ from ..common.types import ROI
 from ..runtime import draw_layout, draw_overlay
 from .approve_dialog import ApproveDialog
 from .roi_label import ImageRoiLabel
-from .teach_model import INSPECTION_TYPES, TeachModel, expected_of, tool_config
+from .teach_model import (
+    INSPECTION_TYPES,
+    TeachModel,
+    build_config,
+    modes_for,
+    read_config,
+    tool_config,
+    value_hint,
+)
 
 _FRIENDLY = {d["key"]: d["label"] for d in INSPECTION_TYPES}
-_EXPECTED_HINT = {d["key"]: d["expected_label"] for d in INSPECTION_TYPES}
 
 
 class TeachWindow(QMainWindow):
@@ -79,6 +86,13 @@ class TeachWindow(QMainWindow):
         left_widget = QWidget()
         left_widget.setLayout(left)
 
+        # --- recipe name ---
+        self._recipe_name = QLineEdit("" if self._model.product == "New Product" else self._model.product)
+        self._recipe_name.setPlaceholderText("Recipe name, e.g. Tablets 500mg")
+        self._recipe_name.textChanged.connect(self._name_edited)
+        name_form = QFormLayout()
+        name_form.addRow("Recipe name", self._recipe_name)
+
         # --- palette ---
         palette = QGroupBox("Add inspection")
         palette_layout = QVBoxLayout()
@@ -124,6 +138,7 @@ class TeachWindow(QMainWindow):
         actions.addWidget(self._approve_btn)
 
         side = QVBoxLayout()
+        side.addLayout(name_form)
         side.addWidget(palette)
         side.addWidget(self._tree, 1)
         side.addWidget(delete_btn)
@@ -163,12 +178,19 @@ class TeachWindow(QMainWindow):
         self._t_name = QLineEdit()
         self._t_name.textChanged.connect(self._tool_edited)
         self._t_type = QLabel("")
-        self._t_expected = QLineEdit()
-        self._t_expected.textChanged.connect(self._tool_edited)
+        self._t_mode = QComboBox()
+        self._t_mode.setToolTip(
+            "Fixed = the value never changes. Any readable / Pattern = variable "
+            "(serial, date, etc.)."
+        )
+        self._t_mode.currentTextChanged.connect(self._tool_edited)
+        self._t_value = QLineEdit()
+        self._t_value.textChanged.connect(self._tool_edited)
         form = QFormLayout()
         form.addRow("Name", self._t_name)
         form.addRow("Type", self._t_type)
-        form.addRow("Expected", self._t_expected)
+        form.addRow("Match", self._t_mode)
+        form.addRow("Value", self._t_value)
         w = QWidget()
         w.setLayout(form)
         w.hide()
@@ -195,7 +217,7 @@ class TeachWindow(QMainWindow):
             self._selected = ("region", idx)
         else:
             type_key = self._pending[1]
-            region_index = self._current_region_index()
+            region_index = self._ensure_region()
             region = self._model.regions[region_index]
             rel = ROI(max(0, x - region.roi.x), max(0, y - region.roi.y), w, h)
             count = sum(len(r.tools) for r in self._model.regions) + 1
@@ -212,10 +234,15 @@ class TeachWindow(QMainWindow):
         self._rebuild_tree()
         self._refresh_view()
 
-    def _current_region_index(self) -> int:
-        if self._selected is not None:
+    def _ensure_region(self) -> int:
+        """Return a valid product index, creating a default full-frame product
+        if none exists (so drawing an inspection never crashes)."""
+        if not self._model.regions:
+            h, w = self._reference.shape[:2]
+            return self._model.add_region("Product 1", ROI(0, 0, w, h), self._lanes[0])
+        if self._selected is not None and self._selected[1] < len(self._model.regions):
             return self._selected[1]
-        return 0
+        return len(self._model.regions) - 1
 
     # ---- tree -------------------------------------------------------------
     def _rebuild_tree(self) -> None:
@@ -272,23 +299,34 @@ class TeachWindow(QMainWindow):
         else:
             region = self._model.regions[self._selected[1]]
             tool = region.tools[self._selected[2]]
+            mode, value = read_config(tool.tool_type, tool.config)
             self._t_name.setText(tool.tool_id)
             self._t_type.setText(_FRIENDLY.get(tool.tool_type, tool.tool_type))
-            self._t_expected.setPlaceholderText(_EXPECTED_HINT.get(tool.tool_type, ""))
-            self._t_expected.setText(expected_of(tool.tool_type, tool.config))
+            self._t_mode.clear()
+            self._t_mode.addItems(modes_for(tool.tool_type))
+            self._t_mode.setCurrentText(mode)
+            self._t_value.setText(value)
+            self._t_value.setPlaceholderText(value_hint(tool.tool_type, mode))
             self._product_props.hide()
             self._tool_props.show()
         self._loading = False
 
     # ---- property edits ---------------------------------------------------
+    def _name_edited(self) -> None:
+        name = self._recipe_name.text().strip() or "New Recipe"
+        self._model.product = name
+        self._model.recipe_id = name
+
     def _product_edited(self) -> None:
         if self._loading or self._selected is None or self._selected[0] != "region":
             return
         region = self._model.regions[self._selected[1]]
         region.name = self._p_name.text()
         region.reject_output = self._p_lane.currentText()
+        item = self._tree.currentItem()  # update label in place (no cursor reset)
+        if item is not None:
+            item.setText(0, f"{region.name}  →  {region.reject_output}")
         self._last_results = None
-        self._rebuild_tree()
         self._refresh_view()
 
     def _tool_edited(self) -> None:
@@ -297,9 +335,14 @@ class TeachWindow(QMainWindow):
         region = self._model.regions[self._selected[1]]
         tool = region.tools[self._selected[2]]
         tool.tool_id = self._t_name.text()
-        tool.config = tool_config(tool.tool_type, self._t_expected.text().strip())
+        mode = self._t_mode.currentText() or modes_for(tool.tool_type)[0]
+        tool.config = build_config(tool.tool_type, mode, self._t_value.text().strip())
+        self._t_value.setPlaceholderText(value_hint(tool.tool_type, mode))
+        item = self._tree.currentItem()
+        if item is not None:
+            friendly = _FRIENDLY.get(tool.tool_type, tool.tool_type)
+            item.setText(0, f"{tool.tool_id} · {friendly}")
         self._last_results = None
-        self._rebuild_tree()
         self._refresh_view()
 
     def _delete_selected(self) -> None:

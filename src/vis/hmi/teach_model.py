@@ -26,22 +26,75 @@ INSPECTION_TYPES = [
 ]
 
 
-def tool_config(tool_type: str, expected: str) -> dict:
-    """Build a tool config from a single 'expected' value, per tool type."""
+# Match modes — how an inspection decides pass/fail. Supports both STATIC
+# (fixed value) and VARIABLE (any readable / pattern) codes and text.
+FIXED = "Fixed value"
+ANY_CODE = "Any readable code"
+CONTAINS = "Contains text"
+PATTERN = "Matches pattern"
+
+CODE_MODES = [FIXED, ANY_CODE, PATTERN]
+TEXT_MODES = [FIXED, CONTAINS, PATTERN]
+
+
+def modes_for(tool_type: str) -> list[str]:
+    return CODE_MODES if tool_type == "code_verify" else TEXT_MODES
+
+
+def value_hint(tool_type: str, mode: str) -> str:
+    if mode == ANY_CODE:
+        return "(no value needed — passes if a code is read)"
+    if mode == PATTERN:
+        return r"regex, e.g. \d{4}/\d{2} for a date or [A-Z0-9]+ for a serial"
+    if mode == CONTAINS:
+        return "text that must appear, e.g. LOT"
     if tool_type == "code_verify":
-        return {"gs1": True, "expected_data": expected} if expected else {"gs1": True}
-    if tool_type == "ocv_text":
-        return {"expected": expected, "uppercase": True}
-    return {}
+        return "exact code data, e.g. a fixed GS1 string"
+    return "exact text, e.g. LOT42"
+
+
+def build_config(tool_type: str, mode: str, value: str) -> dict:
+    """Build a tool config from a match mode + value (static or variable)."""
+    if tool_type == "code_verify":
+        if mode == ANY_CODE:
+            return {"gs1": True}
+        if mode == PATTERN:
+            return {"gs1": True, "pattern": value}
+        return {"gs1": True, "expected_data": value}  # FIXED
+    # ocv_text
+    if mode == CONTAINS:
+        return {"match": "contains", "expected": value, "uppercase": True}
+    if mode == PATTERN:
+        return {"match": "regex", "pattern": value, "uppercase": True}
+    return {"match": "exact", "expected": value, "uppercase": True}  # FIXED
+
+
+def read_config(tool_type: str, config: dict) -> tuple[str, str]:
+    """Inverse of build_config: (mode, value) from a stored config."""
+    if tool_type == "code_verify":
+        if config.get("pattern"):
+            return (PATTERN, config["pattern"])
+        if "expected_data" in config:
+            return (FIXED, config.get("expected_data", "") or "")
+        return (ANY_CODE, "")
+    match = config.get("match", "exact")
+    if match == "contains":
+        return (CONTAINS, config.get("expected", "") or "")
+    if match == "regex":
+        return (PATTERN, config.get("pattern", "") or "")
+    return (FIXED, config.get("expected", "") or "")
+
+
+def tool_config(tool_type: str, expected: str) -> dict:
+    """Backwards-compatible helper: a single 'expected' value → config."""
+    if tool_type == "code_verify" and not expected:
+        return build_config(tool_type, ANY_CODE, "")
+    return build_config(tool_type, FIXED, expected)
 
 
 def expected_of(tool_type: str, config: dict) -> str:
-    """Inverse of tool_config: the single 'expected' value from a config."""
-    if tool_type == "code_verify":
-        return config.get("expected_data", "") or ""
-    if tool_type == "ocv_text":
-        return config.get("expected", "") or ""
-    return ""
+    """The 'value' part of a config (mode-agnostic)."""
+    return read_config(tool_type, config)[1]
 
 
 class TeachModel:

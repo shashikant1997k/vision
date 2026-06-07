@@ -23,6 +23,22 @@ def test_teach_tool_config_by_type():
     assert tool_config("ocv_text", "LOT42")["expected"] == "LOT42"
 
 
+def test_match_mode_build_read_roundtrip():
+    from vis.hmi.teach_model import build_config, read_config
+
+    cases = [
+        ("code_verify", "Fixed value", "0109506..."),
+        ("code_verify", "Any readable code", ""),
+        ("code_verify", "Matches pattern", r"\d{14}"),
+        ("ocv_text", "Fixed value", "LOT42"),
+        ("ocv_text", "Contains text", "LOT"),
+        ("ocv_text", "Matches pattern", r"\d{4}/\d{2}"),
+    ]
+    for tool_type, mode, value in cases:
+        config = build_config(tool_type, mode, value)
+        assert read_config(tool_type, config) == (mode, value)
+
+
 def test_teach_build_and_test_passes():
     frame = _reference_frame()
     model = TeachModel("Demo Tablets", "taught-demo")
@@ -155,6 +171,35 @@ def test_teach_delete_inspection(tmp_path):
     assert win._model.regions[0].tools == []
 
 
+def test_teach_draw_after_deleting_all_products_does_not_crash(tmp_path):
+    pytest.importorskip("PySide6")
+    _qapp()
+    sf, qa_id = _qa_setup(tmp_path)
+    win = _teach_window(sf, qa_id)
+    # delete the default product, leaving none
+    win._selected = ("region", 0)
+    win._delete_selected()
+    assert win._model.regions == []
+    # drawing an inspection now must auto-create a product (regression: IndexError)
+    win._arm_tool("code_verify")
+    win._on_roi_drawn(30, 30, 300, 300)
+    assert len(win._model.regions) == 1
+    assert len(win._model.regions[0].tools) == 1
+
+
+def test_teach_variable_code_pattern(tmp_path):
+    pytest.importorskip("PySide6")
+    _qapp()
+    sf, qa_id = _qa_setup(tmp_path)
+    win = _teach_window(sf, qa_id)
+    win._arm_tool("code_verify")
+    win._on_roi_drawn(30, 30, 300, 300)
+    win._t_mode.setCurrentText("Matches pattern")
+    win._t_value.setText(r"\d{2}.*")  # variable: any code starting with two digits
+    config = win._model.regions[0].tools[0].config
+    assert config.get("pattern") == r"\d{2}.*" and "expected_data" not in config
+
+
 def test_teach_draw_test_save_approve(tmp_path):
     pytest.importorskip("PySide6")
     _qapp()
@@ -165,7 +210,8 @@ def test_teach_draw_test_save_approve(tmp_path):
     win = _teach_window(sf, qa_id)
     win._arm_tool("code_verify")
     win._on_roi_drawn(30, 30, 300, 300)
-    win._t_expected.setText(_gs1("SN0001"))  # edit in the properties panel
+    win._t_mode.setCurrentText("Fixed value")     # static code
+    win._t_value.setText(_gs1("SN0001"))           # edit in the properties panel
     assert win._model.regions[0].tools[0].config.get("expected_data") == _gs1("SN0001")
 
     win._test()

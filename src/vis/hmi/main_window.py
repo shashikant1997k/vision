@@ -58,12 +58,11 @@ class MainWindow(QMainWindow):
 
         # recipe selector: built-in demo + any approved recipes from the DB
         self._recipe_combo = QComboBox()
-        self._recipe_combo.addItem("Demo (built-in)", None)
-        if session_factory is not None:
-            from ..db.store import RecipeRepository
-
-            for rid, name, version in RecipeRepository(session_factory).list_approved():
-                self._recipe_combo.addItem(f"{name} v{version}", rid)
+        self._reload_btn = QPushButton("↻")
+        self._reload_btn.setFixedWidth(30)
+        self._reload_btn.setToolTip("Reload recipes from the database")
+        self._reload_btn.clicked.connect(self._reload_recipes)
+        self._reload_recipes()
         self._batch_no = QLineEdit()
         self._batch_no.setPlaceholderText("batch no. (optional)")
         self._close_batch = QPushButton("Close batch")
@@ -105,8 +104,11 @@ class MainWindow(QMainWindow):
         buttons.addWidget(self._teach)
         buttons.addWidget(self._settings)
 
+        recipe_row = QHBoxLayout()
+        recipe_row.addWidget(self._recipe_combo, 1)
+        recipe_row.addWidget(self._reload_btn)
         job_form = QFormLayout()
-        job_form.addRow("Recipe", self._recipe_combo)
+        job_form.addRow("Recipe", recipe_row)
         job_form.addRow("Batch", self._batch_no)
 
         side = QVBoxLayout()
@@ -130,6 +132,29 @@ class MainWindow(QMainWindow):
         self._timer = QTimer(self)
         self._timer.setInterval(100)
         self._timer.timeout.connect(self._refresh)
+
+    def _reload_recipes(self) -> None:
+        """Repopulate the recipe selector from the DB (built-in demo + approved)."""
+        current = self._recipe_combo.currentData()
+        self._recipe_combo.blockSignals(True)
+        self._recipe_combo.clear()
+        self._recipe_combo.addItem("Demo (built-in)", None)
+        if self._sf is not None:
+            from ..db.store import RecipeRepository
+
+            for rid, name, version in RecipeRepository(self._sf).list_approved():
+                self._recipe_combo.addItem(f"{name} v{version}", rid)
+        idx = self._recipe_combo.findData(current)
+        if idx >= 0:
+            self._recipe_combo.setCurrentIndex(idx)
+        self._recipe_combo.blockSignals(False)
+
+    def changeEvent(self, event) -> None:
+        from PySide6.QtCore import QEvent
+
+        if event.type() == QEvent.ActivationChange and self.isActiveWindow():
+            self._reload_recipes()  # refresh after returning from the teach window
+        super().changeEvent(event)
 
     def _resolve_recipe(self):
         """Return (domain_recipe, recipe_db_id|None) for the selected recipe."""

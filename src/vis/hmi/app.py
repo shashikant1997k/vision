@@ -19,6 +19,16 @@ def _sim_factory(camera_id, settings, recipe):
 
 
 def main() -> int:
+    import os
+    from pathlib import Path
+
+    # Persist to a fixed location so saved recipes survive across runs regardless
+    # of the working directory (a relative sqlite file would not).
+    if not os.environ.get("DATABASE_URL"):
+        data_dir = Path.home() / ".vision-inspection"
+        data_dir.mkdir(exist_ok=True)
+        os.environ["DATABASE_URL"] = f"sqlite:///{data_dir / 'vis.db'}"
+
     from PySide6.QtWidgets import QApplication, QDialog
 
     from ..cli import build_code_demo_recipe

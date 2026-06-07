@@ -49,6 +49,15 @@ def test_gs1_field_verification():
     assert result.detail["fields"]["expiry"] == "260101"
 
 
+def test_variable_code_pattern_match():
+    # a variable code: accept any value matching the pattern (e.g. a serial)
+    img = _qr_image("SN12345")
+    ok = build_tool("code_verify", "c1", {"gs1": False, "pattern": r"SN\d+"})
+    assert ok.inspect(img).passed
+    bad = build_tool("code_verify", "c1", {"gs1": False, "pattern": r"LOT\d+"})
+    assert not bad.inspect(img).passed
+
+
 def test_no_decode_grades_f():
     blank = np.full((60, 60, 3), 128, dtype=np.uint8)
     tool = build_tool("code_verify", "c1", {"expected_data": "X"})

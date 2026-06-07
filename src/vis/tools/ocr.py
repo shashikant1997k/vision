@@ -21,15 +21,33 @@ _ENGINE = None
 
 
 def _engine():
+    """Lazily build the OCR engine. Model files are swappable via env vars
+    (VIS_OCR_DET_MODEL / VIS_OCR_REC_MODEL / VIS_OCR_CLS_MODEL) so a higher
+    accuracy recogniser (e.g. PP-OCRv4 ONNX) can be dropped in without code
+    changes — the bundled model is PP-OCRv3 mobile."""
     global _ENGINE
     if _ENGINE is None:
+        import os
+
         try:
             from rapidocr_onnxruntime import RapidOCR
         except ImportError as exc:  # pragma: no cover
             raise RuntimeError(
                 "OCR engine not installed. Install it with: pip install '.[ocr]'"
             ) from exc
-        _ENGINE = RapidOCR()
+        kwargs = {}
+        for env, key in (
+            ("VIS_OCR_DET_MODEL", "det_model_path"),
+            ("VIS_OCR_REC_MODEL", "rec_model_path"),
+            ("VIS_OCR_CLS_MODEL", "cls_model_path"),
+        ):
+            path = os.environ.get(env)
+            if path:
+                kwargs[key] = path
+        try:
+            _ENGINE = RapidOCR(**kwargs) if kwargs else RapidOCR()
+        except Exception:  # pragma: no cover - bad override path
+            _ENGINE = RapidOCR()
     return _ENGINE
 
 
@@ -47,19 +65,38 @@ def _pad(image, border: int):
 
 
 def _prepare(image):
-    """Pad + upscale a small ROI so PP-OCR reads small text/punctuation better."""
+    """Preprocess an ROI for reliable OCR: pad for detector margin, upscale small
+    crops (PP-OCR reads small text/punctuation far better when enlarged), convert
+    to grayscale and normalise contrast (CLAHE) for low-contrast / foil prints.
+
+    NB: binarisation (Otsu/adaptive) is intentionally NOT done — PP-OCR is trained
+    on natural images and binarising measurably loses thin glyphs like '.'.
+    """
     import numpy as np
 
-    arr = _pad(image, 20)
-    h = arr.shape[0]
-    target = 64
-    if 0 < h < target:
-        from PIL import Image
+    arr = _pad(image, 16)
+    target = 160
+    try:
+        import cv2
 
-        factor = min(4.0, target / h)
-        size = (max(1, int(arr.shape[1] * factor)), max(1, int(h * factor)))
-        arr = np.array(Image.fromarray(arr).resize(size, Image.LANCZOS), dtype=np.uint8)
-    return arr
+        gray = cv2.cvtColor(arr, cv2.COLOR_RGB2GRAY)
+        h = gray.shape[0]
+        if 0 < h < target:
+            factor = min(4.0, target / h)
+            gray = cv2.resize(gray, None, fx=factor, fy=factor, interpolation=cv2.INTER_CUBIC)
+        if gray.std() < 55:  # only normalise genuinely low-contrast / foil prints
+            gray = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(gray)
+        return cv2.cvtColor(gray, cv2.COLOR_GRAY2RGB)
+    except Exception:
+        # OpenCV missing — fall back to a plain PIL upscale
+        h = arr.shape[0]
+        if 0 < h < target:
+            from PIL import Image
+
+            factor = min(4.0, target / h)
+            size = (max(1, int(arr.shape[1] * factor)), max(1, int(h * factor)))
+            arr = np.array(Image.fromarray(arr).resize(size, Image.LANCZOS), dtype=np.uint8)
+        return arr
 
 
 def _match_key(s: str) -> str:

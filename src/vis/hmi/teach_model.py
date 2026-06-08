@@ -23,7 +23,24 @@ INSPECTION_TYPES = [
         "label": "Read Text (OCR)",
         "expected_label": "Expected text, e.g. LOT42",
     },
+    {"key": "presence", "label": "Presence / Absence", "expected_label": ""},
+    {"key": "measure", "label": "Measure (size)", "expected_label": ""},
+    {"key": "color_check", "label": "Colour check", "expected_label": ""},
+    {"key": "template_match", "label": "Match template (artwork)", "expected_label": ""},
 ]
+
+# Tool types whose pass/fail is value/match based (the properties panel edits them).
+MATCH_TOOLS = ("code_verify", "ocv_text")
+
+
+def default_config(tool_type: str) -> dict:
+    """Sensible starting config when an inspection is first drawn."""
+    return {
+        "presence": {"mode": "present", "min_coverage": 0.05},
+        "measure": {"axis": "width", "min_px": 10, "max_px": 100000},
+        "color_check": {"target": [128, 128, 128], "tolerance": 40},
+        "template_match": {},  # golden template captured from the drawn ROI
+    }.get(tool_type, {})
 
 
 # Match modes — how an inspection decides pass/fail. Supports STATIC (fixed),

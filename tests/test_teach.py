@@ -301,6 +301,32 @@ def test_teach_zoom_and_fit():
     assert win._image._zoom == 1.0 and win._image._pan_x == 0.0
 
 
+def test_teach_add_general_tools(tmp_path):
+    pytest.importorskip("PySide6")
+    pytest.importorskip("cv2")
+    _qapp()
+    sf, qa_id = _qa_setup(tmp_path)
+    win = _teach_window(sf, qa_id)
+
+    win._arm_tool("presence")
+    win._on_roi_drawn(10, 10, 40, 40)
+    tool = win._model.regions[0].tools[0]
+    assert tool.tool_type == "presence" and tool.config.get("mode") == "present"
+
+    # editing the name must NOT wipe a general tool's config
+    win._selected = ("tool", 0, 0)
+    win._load_properties()
+    win._t_name.setText("cap_present")
+    win._tool_edited()
+    assert win._model.regions[0].tools[0].config.get("mode") == "present"
+    assert win._model.regions[0].tools[0].tool_id == "cap_present"
+
+    # template_match captures a golden patch on draw
+    win._arm_tool("template_match")
+    win._on_roi_drawn(20, 20, 30, 30)
+    assert win._model.regions[0].tools[1].config.get("template")
+
+
 def test_teach_duplicate_inspection(tmp_path):
     pytest.importorskip("PySide6")
     _qapp()

@@ -29,9 +29,11 @@ from .teach_model import (
     BATCH_FIELD,
     BATCH_FIELDS,
     INSPECTION_TYPES,
+    MATCH_TOOLS,
     ROTATIONS,
     TeachModel,
     build_config,
+    default_config,
     modes_for,
     read_config,
     tool_config,
@@ -380,14 +382,20 @@ class TeachWindow(QMainWindow):
             region = self._model.regions[region_index]
             rel = ROI(max(0, x - region.roi.x), max(0, y - region.roi.y), w, h)
             count = sum(len(r.tools) for r in self._model.regions) + 1
-            tool_id = ("code" if type_key == "code_verify" else "text") + str(count)
-            t_idx = self._model.add_tool(
-                region_index, tool_id, type_key, rel, tool_config(type_key, "")
-            )
+            prefix = {"code_verify": "code", "ocv_text": "text"}.get(type_key, type_key)
+            tool_id = prefix + str(count)
+            if type_key in MATCH_TOOLS:
+                config = tool_config(type_key, "")
+            else:
+                config = default_config(type_key)
+            if type_key == "template_match":  # capture the golden patch from the ROI
+                from ..tools.general import register_template
+
+                config = {"template": register_template(self._teach_image()[y : y + h, x : x + w]), "min_score": 0.6}
+            t_idx = self._model.add_tool(region_index, tool_id, type_key, rel, config)
             self._selected = ("tool", region_index, t_idx)
             self._set_guide(
-                "Added. Set the <b>Expected</b> value below (or leave blank), "
-                "then add more or click <b>Test</b>."
+                "Added. Set its options below (or leave defaults), then add more or click <b>Test</b>."
             )
         self._pending = None
         self._rebuild_tree()
@@ -545,9 +553,28 @@ class TeachWindow(QMainWindow):
         else:
             region = self._model.regions[self._selected[1]]
             tool = region.tools[self._selected[2]]
-            info = read_config(tool.tool_type, tool.config)
             self._t_name.setText(tool.tool_id)
             self._t_type.setText(_FRIENDLY.get(tool.tool_type, tool.tool_type))
+            if tool.tool_type not in MATCH_TOOLS:
+                # general tool (presence/measure/colour/template): name editable,
+                # settings shown read-only (config came from sensible defaults)
+                import json
+
+                self._t_mode.setEnabled(False)
+                self._t_value.setEnabled(False)
+                for w in (self._t_field, self._t_rotation, self._t_minconf, self._t_reader, self._t_required):
+                    w.setEnabled(False)
+                self._t_lastread.setText("Settings: " + json.dumps(tool.config or {}))
+                self._product_props.hide()
+                self._tool_props.show()
+                self._loading = False
+                return
+            for w in (
+                self._t_mode, self._t_value, self._t_field, self._t_rotation,
+                self._t_minconf, self._t_reader, self._t_required,
+            ):
+                w.setEnabled(True)
+            info = read_config(tool.tool_type, tool.config)
             self._t_mode.clear()
             self._t_mode.addItems(modes_for(tool.tool_type))
             self._t_mode.setCurrentText(info["mode"])
@@ -604,6 +631,13 @@ class TeachWindow(QMainWindow):
         region = self._model.regions[self._selected[1]]
         tool = region.tools[self._selected[2]]
         tool.tool_id = self._t_name.text()
+        if tool.tool_type not in MATCH_TOOLS:
+            # general tools: only the name is editable here; keep their config
+            item = self._tree.currentItem()
+            if item is not None:
+                friendly = _FRIENDLY.get(tool.tool_type, tool.tool_type)
+                item.setText(0, f"{tool.tool_id} · {friendly}")
+            return
         mode = self._t_mode.currentText() or modes_for(tool.tool_type)[0]
         cfg = build_config(
             tool.tool_type,

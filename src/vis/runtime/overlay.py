@@ -48,7 +48,16 @@ def _label(draw, xy, text, color, font):
     draw.text((x, y), text, fill=color, font=font)
 
 
-_FRIENDLY = {"code_verify": "Read Code", "ocv_text": "Read Text", "ocv_stub": "Read Text"}
+_FRIENDLY = {
+    "code_verify": "Read Code",
+    "ocv_text": "Read Text",
+    "ocv_stub": "Read Text",
+    "ocv_font": "Read Text",
+    "presence": "Presence",
+    "measure": "Measure",
+    "color_check": "Colour",
+    "template_match": "Template",
+}
 YELLOW = (255, 200, 0)
 CYAN = (0, 200, 220)
 

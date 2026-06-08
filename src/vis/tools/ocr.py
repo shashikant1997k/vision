@@ -209,9 +209,12 @@ class OcrTextTool(InspectionTool):
     def inspect(self, roi_image) -> ToolResult:
         from .transform import rotate_image
 
+        from .readers import get_text_reader
+
+        reader = get_text_reader(self.config.get("reader"))
         rotation = self.config.get("rotation", 0)
         roi = rotate_image(roi_image, rotation)
-        text, score = recognize(roi)
+        text, score = reader(roi, self.config)
         # Only search orientations when the straight read is WEAK (empty / a few
         # chars / low confidence) — otherwise we'd risk "improving" a good read
         # into a 180°-flipped one. For reliable reading, orient the image upright
@@ -224,7 +227,7 @@ class OcrTextTool(InspectionTool):
 
             best_text, best_score, best = text, score, _metric(text, score)
             for extra in (90, 180, 270):
-                t2, s2 = recognize(rotate_image(roi, extra))
+                t2, s2 = reader(rotate_image(roi, extra), self.config)
                 if _metric(t2, s2) > best:
                     best_text, best_score, best = t2, s2, _metric(t2, s2)
             text, score = best_text, best_score

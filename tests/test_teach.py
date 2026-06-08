@@ -301,6 +301,42 @@ def test_teach_zoom_and_fit():
     assert win._image._zoom == 1.0 and win._image._pan_x == 0.0
 
 
+def test_teach_duplicate_inspection(tmp_path):
+    pytest.importorskip("PySide6")
+    _qapp()
+    sf, qa_id = _qa_setup(tmp_path)
+    win = _teach_window(sf, qa_id)
+    win._arm_tool("ocv_text")
+    win._on_roi_drawn(20, 20, 80, 24)
+    win._t_mode.setCurrentText("Fixed value")
+    win._t_value.setText("LOT42")
+    win._selected = ("tool", 0, 0)
+    win._duplicate_selected()
+    tools = win._model.regions[0].tools
+    assert len(tools) == 2
+    assert tools[1].config.get("expected") == "LOT42"  # config copied
+    assert (tools[1].roi.x, tools[1].roi.y) == (40, 40)  # offset so it's visible
+
+
+def test_teach_min_confidence_and_clear_locator(tmp_path):
+    pytest.importorskip("PySide6")
+    pytest.importorskip("cv2")
+    _qapp()
+    sf, qa_id = _qa_setup(tmp_path)
+    win = _teach_window(sf, qa_id)
+    win._arm_tool("ocv_text")
+    win._on_roi_drawn(20, 20, 80, 24)
+    win._t_minconf.setValue(70)
+    assert win._model.regions[0].tools[0].config.get("min_confidence") == 0.7
+
+    win._arm_locator()
+    win._on_roi_drawn(5, 5, 40, 40)
+    assert win._model.regions[0].fixture is not None
+    win._selected = ("region", 0)
+    win._clear_locator()
+    assert win._model.regions[0].fixture is None
+
+
 def test_teach_set_part_locator(tmp_path):
     pytest.importorskip("PySide6")
     pytest.importorskip("cv2")

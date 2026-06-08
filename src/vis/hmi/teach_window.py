@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMainWindow,
     QPushButton,
+    QSpinBox,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -165,8 +166,14 @@ class TeachWindow(QMainWindow):
         self._tree = QTreeWidget()
         self._tree.setHeaderLabels(["Inspection plan"])
         self._tree.itemSelectionChanged.connect(self._on_tree_selection)
+        dup_btn = QPushButton("Duplicate")
+        dup_btn.setToolTip("Copy the selected inspection (offset) — fast multi-field setup.")
+        dup_btn.clicked.connect(self._duplicate_selected)
         delete_btn = QPushButton("Delete selected")
         delete_btn.clicked.connect(self._delete_selected)
+        tree_buttons = QHBoxLayout()
+        tree_buttons.addWidget(dup_btn)
+        tree_buttons.addWidget(delete_btn)
 
         # --- properties panel ---
         self._props_box = QGroupBox("Properties")
@@ -197,7 +204,7 @@ class TeachWindow(QMainWindow):
         side.addLayout(name_form)
         side.addWidget(palette)
         side.addWidget(self._tree, 1)
-        side.addWidget(delete_btn)
+        side.addLayout(tree_buttons)
         side.addWidget(self._props_box)
         side.addLayout(actions)
         side.addWidget(self._status)
@@ -260,10 +267,18 @@ class TeachWindow(QMainWindow):
         self._p_logic.addItem("Any inspection passes", "any")
         self._p_logic.setToolTip("PASS rule over this product's required inspections.")
         self._p_logic.currentTextChanged.connect(self._product_edited)
+        self._p_locator = QLabel("none")
+        clear_loc = QPushButton("Clear")
+        clear_loc.setFixedWidth(60)
+        clear_loc.clicked.connect(self._clear_locator)
+        loc_row = QHBoxLayout()
+        loc_row.addWidget(self._p_locator, 1)
+        loc_row.addWidget(clear_loc)
         form = QFormLayout()
         form.addRow("Name", self._p_name)
         form.addRow("Reject lane", self._p_lane)
         form.addRow("Pass when", self._p_logic)
+        form.addRow("Part locator", loc_row)
         w = QWidget()
         w.setLayout(form)
         w.hide()
@@ -291,6 +306,14 @@ class TeachWindow(QMainWindow):
             self._t_rotation.addItem(f"{deg}°", deg)
         self._t_rotation.setToolTip("Rotate the box before reading (for sideways print).")
         self._t_rotation.currentTextChanged.connect(self._tool_edited)
+        self._t_minconf = QSpinBox()
+        self._t_minconf.setRange(0, 100)
+        self._t_minconf.setSuffix(" %")
+        self._t_minconf.setToolTip("Reject if the read confidence is below this (0 = off).")
+        self._t_minconf.valueChanged.connect(self._tool_edited)
+        self._t_reader = QComboBox()
+        self._t_reader.setToolTip("Reading engine — a licensed OCR/OCV library appears here once installed.")
+        self._t_reader.currentTextChanged.connect(self._tool_edited)
         self._t_required = QCheckBox("Required (fails the product if this fails)")
         self._t_required.setChecked(True)
         self._t_required.setToolTip("Uncheck to make this inspection informational only.")
@@ -305,6 +328,8 @@ class TeachWindow(QMainWindow):
         form.addRow("Value", self._t_value)
         form.addRow("Batch field", self._t_field)
         form.addRow("Rotation", self._t_rotation)
+        form.addRow("Min confidence", self._t_minconf)
+        form.addRow("Engine", self._t_reader)
         form.addRow("", self._t_required)
         form.addRow("Last read", self._t_lastread)
         w = QWidget()
@@ -510,6 +535,7 @@ class TeachWindow(QMainWindow):
             self._p_lane.setCurrentText(region.reject_output)
             logic_index = self._p_logic.findData(getattr(region, "pass_logic", "all"))
             self._p_logic.setCurrentIndex(logic_index if logic_index >= 0 else 0)
+            self._p_locator.setText("set ✓" if getattr(region, "fixture", None) else "none")
             self._product_props.show()
             self._tool_props.hide()
         else:
@@ -528,6 +554,8 @@ class TeachWindow(QMainWindow):
             field_index = self._t_field.findData(info["field"])
             self._t_field.setCurrentIndex(field_index if field_index >= 0 else 0)
             self._t_required.setChecked(tool.config.get("required", True))
+            self._t_minconf.setValue(int(round((tool.config.get("min_confidence", 0) or 0) * 100)))
+            self._load_engines(tool)
             self._t_lastread.setText(self._last_read_for(region.region_id, tool.tool_id))
             self._sync_tool_inputs(info["mode"])
             self._product_props.hide()
@@ -553,6 +581,19 @@ class TeachWindow(QMainWindow):
         self._last_results = None
         self._refresh_view()
 
+    def _load_engines(self, tool) -> None:
+        """Populate the Engine selector with the available reading providers."""
+        from ..tools.readers import available_code_readers, available_text_readers
+
+        names = available_code_readers() if tool.tool_type == "code_verify" else available_text_readers()
+        self._t_reader.clear()
+        for name in names:
+            label = "Built-in" if name == "builtin" else name
+            self._t_reader.addItem(label, name)
+        current = (tool.config or {}).get("reader", "builtin")
+        idx = self._t_reader.findData(current)
+        self._t_reader.setCurrentIndex(idx if idx >= 0 else 0)
+
     def _tool_edited(self) -> None:
         if self._loading or self._selected is None or self._selected[0] != "tool":
             return
@@ -569,6 +610,11 @@ class TeachWindow(QMainWindow):
         )
         if not self._t_required.isChecked():
             cfg["required"] = False
+        if self._t_minconf.value() > 0:
+            cfg["min_confidence"] = self._t_minconf.value() / 100
+        engine = self._t_reader.currentData()
+        if engine and engine != "builtin":
+            cfg["reader"] = engine
         tool.config = cfg
         self._t_value.setPlaceholderText(value_hint(tool.tool_type, mode))
         self._sync_tool_inputs(mode)
@@ -578,6 +624,31 @@ class TeachWindow(QMainWindow):
             item.setText(0, f"{tool.tool_id} · {friendly}")
         self._last_results = None
         self._refresh_view()
+
+    def _duplicate_selected(self) -> None:
+        if self._selected is None or self._selected[0] != "tool":
+            self._status.setText("Select an inspection in the plan to duplicate.")
+            return
+        ri, ti = self._selected[1], self._selected[2]
+        src = self._model.regions[ri].tools[ti]
+        count = sum(len(r.tools) for r in self._model.regions) + 1
+        new_id = ("code" if src.tool_type == "code_verify" else "text") + str(count)
+        new_roi = ROI(src.roi.x + 20, src.roi.y + 20, src.roi.w, src.roi.h)
+        idx = self._model.add_tool(ri, new_id, src.tool_type, new_roi, dict(src.config))
+        self._selected = ("tool", ri, idx)
+        self._last_results = None
+        self._rebuild_tree()
+        self._refresh_view()
+        self._set_guide("Duplicated — drag the copy's box/handles to its field, then edit its value.")
+
+    def _clear_locator(self) -> None:
+        if self._selected is None or self._selected[0] != "region":
+            return
+        self._model.regions[self._selected[1]].fixture = None
+        self._last_results = None
+        self._load_properties()
+        self._refresh_view()
+        self._status.setText("Part locator cleared.")
 
     def _delete_selected(self) -> None:
         if self._selected is None:

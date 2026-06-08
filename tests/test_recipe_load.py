@@ -50,6 +50,23 @@ def test_load_preserves_image_rotation(tmp_path):
     assert repo.load(rid).image_rotation == 90
 
 
+def test_load_preserves_fixture(tmp_path):
+    from vis.domain.entities import Fixture
+
+    sf, qa_id = _setup(tmp_path)
+    repo = RecipeRepository(sf)
+    recipe = build_code_demo_recipe()
+    recipe.regions[0].fixture = Fixture(
+        template=b"\x89PNG-fake-bytes", anchor_x=12, anchor_y=34, search_margin=70, min_score=0.6
+    )
+    rid = repo.save_draft(recipe, user_id=qa_id)
+    repo.approve(rid, qa_id, "Secret123", "released")
+    f = repo.load(rid).regions[0].fixture
+    assert f is not None
+    assert f.template == b"\x89PNG-fake-bytes"
+    assert (f.anchor_x, f.anchor_y, f.search_margin, f.min_score) == (12, 34, 70, 0.6)
+
+
 def test_load_missing_recipe_raises(tmp_path):
     sf, _ = _setup(tmp_path)
     with pytest.raises(ValueError):

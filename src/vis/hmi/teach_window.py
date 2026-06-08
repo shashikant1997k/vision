@@ -135,6 +135,13 @@ class TeachWindow(QMainWindow):
         add_area = QPushButton("+ Add another product / area")
         add_area.clicked.connect(self._arm_region)
         palette_layout.addWidget(add_area)
+        self._locator_btn = QPushButton("Set part locator (follows the part)")
+        self._locator_btn.setToolTip(
+            "Draw a box around a distinctive, fixed feature (logo/edge/corner). "
+            "Inspections then follow the part as it shifts on the line."
+        )
+        self._locator_btn.clicked.connect(self._arm_locator)
+        palette_layout.addWidget(self._locator_btn)
         palette.setLayout(palette_layout)
 
         # --- inspection plan tree ---
@@ -300,11 +307,21 @@ class TeachWindow(QMainWindow):
         self._pending = ("region",)
         self._set_guide("Now drag a box around the product / area on the image.")
 
+    def _arm_locator(self) -> None:
+        self._pending = ("locator",)
+        self._set_guide(
+            "Draw a box around a <b>distinctive, always-present feature</b> "
+            "(logo, edge, corner) — inspections will follow it as the part shifts."
+        )
+
     def _on_roi_drawn(self, x: int, y: int, w: int, h: int) -> None:
         if self._pending is None:
             self._set_guide("Click <b>Read Code</b> or <b>Read Text</b> first, then drag a box.")
             return
         self._last_results = None
+        if self._pending[0] == "locator":
+            self._set_locator(x, y, w, h)
+            return
         if self._pending[0] == "region":
             idx = self._model.add_region(
                 f"Product {len(self._model.regions) + 1}", ROI(x, y, w, h), self._lanes[0]
@@ -341,6 +358,28 @@ class TeachWindow(QMainWindow):
         if self._model.regions:
             self._model.regions[0].roi = ROI(0, 0, w, h)  # keep the default product full-frame
         self._last_results = None
+        self._refresh_view()
+
+    def _set_locator(self, x: int, y: int, w: int, h: int) -> None:
+        from ..domain.entities import Fixture
+        from ..runtime.locator import encode_template
+
+        region_index = self._ensure_region()
+        region = self._model.regions[region_index]
+        try:
+            template = encode_template(self._teach_image(), ROI(x, y, w, h))
+        except Exception as exc:
+            self._status.setText(f"Could not set locator: {exc}")
+            self._pending = None
+            return
+        region.fixture = Fixture(template=template, anchor_x=x, anchor_y=y)
+        self._selected = ("region", region_index)
+        self._pending = None
+        self._set_guide(
+            "Part locator set ✓ — inspections now follow the part. "
+            "Add inspections or click <b>Test</b>."
+        )
+        self._rebuild_tree()
         self._refresh_view()
 
     def _on_roi_adjusted(self, x: int, y: int, w: int, h: int) -> None:

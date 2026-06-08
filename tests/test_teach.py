@@ -266,6 +266,20 @@ def test_teach_batch_field_and_rotation(tmp_path):
     assert win._model.regions[0].tools[0].config.get("rotation") == 90
 
 
+def test_teach_set_part_locator(tmp_path):
+    pytest.importorskip("PySide6")
+    pytest.importorskip("cv2")
+    _qapp()
+    sf, qa_id = _qa_setup(tmp_path)
+    win = _teach_window(sf, qa_id)
+    win._arm_locator()
+    win._on_roi_drawn(20, 30, 60, 50)  # draw a box around a feature
+    fixture = win._model.regions[0].fixture
+    assert fixture is not None
+    assert (fixture.anchor_x, fixture.anchor_y) == (20, 30)
+    assert len(fixture.template) > 0
+
+
 def test_teach_variable_code_pattern(tmp_path):
     pytest.importorskip("PySide6")
     _qapp()

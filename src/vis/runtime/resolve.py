@@ -52,6 +52,7 @@ def resolve_batch_fields(recipe: Recipe, batch_data: dict | None) -> Recipe:
             Region(
                 region.region_id, region.name, region.roi, region.reject_output, tools,
                 pass_logic=getattr(region, "pass_logic", "all"),
+                fixture=getattr(region, "fixture", None),
             )
         )
     return Recipe(

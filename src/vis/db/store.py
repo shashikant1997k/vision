@@ -3,6 +3,7 @@ from __future__ import annotations
 from sqlalchemy import func, select
 
 from ..common.types import ROI
+from ..domain.entities import Fixture
 from ..domain.entities import Recipe as DomainRecipe
 from ..domain.entities import Region as DomainRegion
 from ..domain.entities import ToolSpec
@@ -23,6 +24,34 @@ from .models import (
 
 def _roi(roi) -> dict:
     return {"x": roi.x, "y": roi.y, "w": roi.w, "h": roi.h}
+
+
+def _fixture_to_json(fixture) -> dict | None:
+    if fixture is None:
+        return None
+    import base64
+
+    return {
+        "template": base64.b64encode(fixture.template).decode("ascii"),
+        "anchor_x": fixture.anchor_x,
+        "anchor_y": fixture.anchor_y,
+        "search_margin": fixture.search_margin,
+        "min_score": fixture.min_score,
+    }
+
+
+def _fixture_from_json(data) -> Fixture | None:
+    if not data:
+        return None
+    import base64
+
+    return Fixture(
+        template=base64.b64decode(data["template"]),
+        anchor_x=data["anchor_x"],
+        anchor_y=data["anchor_y"],
+        search_margin=data.get("search_margin", 80),
+        min_score=data.get("min_score", 0.5),
+    )
 
 
 class ResultStore:
@@ -138,6 +167,7 @@ class RecipeRepository:
                     roi=_roi(region.roi),
                     reject_output=region.reject_output,
                     pass_logic=getattr(region, "pass_logic", "all"),
+                    fixture=_fixture_to_json(getattr(region, "fixture", None)),
                 )
                 s.add(region_row)
                 s.flush()
@@ -200,6 +230,7 @@ class RecipeRepository:
                         region_row.reject_output,
                         tools,
                         pass_logic=region_row.pass_logic or "all",
+                        fixture=_fixture_from_json(region_row.fixture),
                     )
                 )
             return DomainRecipe(

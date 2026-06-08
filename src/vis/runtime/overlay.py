@@ -50,6 +50,29 @@ def _label(draw, xy, text, color, font):
 
 _FRIENDLY = {"code_verify": "Read Code", "ocv_text": "Read Text", "ocv_stub": "Read Text"}
 YELLOW = (255, 200, 0)
+CYAN = (0, 200, 220)
+
+
+def _template_size(fixture):
+    try:
+        import cv2
+
+        arr = np.frombuffer(fixture.template, dtype=np.uint8)
+        img = cv2.imdecode(arr, cv2.IMREAD_GRAYSCALE)
+        return img.shape[1], img.shape[0]
+    except Exception:
+        return 40, 40
+
+
+def _draw_locator(draw, region, font):
+    fixture = getattr(region, "fixture", None)
+    if fixture is None:
+        return
+    tw, th = _template_size(fixture)
+    x, y = fixture.anchor_x, fixture.anchor_y
+    draw.rectangle([x, y, x + tw - 1, y + th - 1], outline=CYAN, width=2)
+    label_y = y - 18 if y >= 18 else y + th + 2
+    _label(draw, (x + 2, label_y), "⌖ Locator", CYAN, font)
 
 
 def draw_layout(image: np.ndarray, recipe, highlight=None) -> np.ndarray:
@@ -64,6 +87,7 @@ def draw_layout(image: np.ndarray, recipe, highlight=None) -> np.ndarray:
         rx, ry, rw, rh = region.roi.x, region.roi.y, region.roi.w, region.roi.h
         draw.rectangle([rx, ry, rx + rw - 1, ry + rh - 1], outline=BLUE, width=2)
         _label(draw, (rx + 4, ry + 4), region.name, BLUE, font)
+        _draw_locator(draw, region, font)
         for tool in region.tools:
             ax, ay = rx + tool.roi.x, ry + tool.roi.y
             draw.rectangle([ax, ay, ax + tool.roi.w - 1, ay + tool.roi.h - 1], outline=BLUE, width=1)

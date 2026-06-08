@@ -66,3 +66,29 @@ def test_main_window_runs_and_counts(qapp):
     assert int(window._total.text()) > 0
     window.stop()
     assert window._runner is None
+
+
+def test_main_window_yield_reasons_and_reject_review(qapp):
+    pytest.importorskip("qrcode")
+    from vis.cli import build_code_demo_recipe
+    from vis.engine.sim import SimulatedCodeCamera
+    from vis.hmi.main_window import MainWindow
+    from vis.hmi.review_window import ReviewWindow
+
+    def factory(camera_id, settings, recipe):
+        return SimulatedCodeCamera(camera_id, recipe, num_frames=8, defect_rate=1.0, seed=2)
+
+    window = MainWindow(username="op", recipe=build_code_demo_recipe(), camera_factory=factory)
+    window.start()
+    if window._runner is not None:
+        window._runner.join()
+    window._refresh()
+    assert "%" in window._yield.text()                 # yield shown
+    assert "reject reasons" in window._reasons.text().lower()  # reason breakdown
+    assert len(window._failed_log) > 0                 # rejects captured for review
+
+    review = ReviewWindow(window._failed_log, window._recipe)
+    assert review._counter.text().startswith("Reject ") and "/" in review._counter.text()
+    assert "Failed:" in review._info.text()
+    window.stop()
+    assert window._state.text() == "● Idle"

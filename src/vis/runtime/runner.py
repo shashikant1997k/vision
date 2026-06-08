@@ -34,6 +34,7 @@ class InspectionRunner:
         stats: LiveStats | None = None,
         live_view: LiveView | None = None,
         reject_handler: RejectHandler | None = None,
+        failed_log=None,  # optional FailedImageLog for reject review
         on_frame=None,  # optional callback(frame, results) per processed frame
     ) -> None:
         self.assignments = list(assignments)
@@ -42,6 +43,7 @@ class InspectionRunner:
         self.stats = stats or LiveStats()
         self.live_view = live_view or LiveView()
         self.reject_handler = reject_handler
+        self.failed_log = failed_log
         self.on_frame = on_frame
         self._threads: list[Thread] = []
         self._stop = Event()
@@ -53,10 +55,15 @@ class InspectionRunner:
                     break
                 results = pipeline.process_frame(frame)
                 self.live_view.update(frame, results)
+                any_failed = False
                 for r in results:
                     self.stats.record(r)
-                    if not r.passed and self.reject_handler is not None:
-                        self.reject_handler.reject(r)
+                    if not r.passed:
+                        any_failed = True
+                        if self.reject_handler is not None:
+                            self.reject_handler.reject(r)
+                if any_failed and self.failed_log is not None:
+                    self.failed_log.add(frame, results)
                 if self.on_frame is not None:
                     self.on_frame(frame, results)
         finally:

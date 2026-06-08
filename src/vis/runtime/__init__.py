@@ -9,10 +9,12 @@
 from .live_view import LiveView
 from .overlay import draw_layout, draw_overlay
 from .reject import RecordingRejectHandler, RejectHandler
+from .review import FailedImageLog
 from .runner import InspectionRunner
 from .stats import LiveStats
 
 __all__ = [
+    "FailedImageLog",
     "InspectionRunner",
     "LiveStats",
     "LiveView",

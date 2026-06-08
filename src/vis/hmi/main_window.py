@@ -74,17 +74,29 @@ class MainWindow(QMainWindow):
         self._image.setMinimumSize(640, 360)
         self._image.setStyleSheet("background:#111; color:#888")
 
+        from ..runtime import FailedImageLog
+
+        self._failed_log = FailedImageLog(capacity=100)
+        self._review_window = None
+
         self._total = QLabel("0")
         self._pass = QLabel("0")
         self._fail = QLabel("0")
-        for label in (self._total, self._pass, self._fail):
+        self._yield = QLabel("—")
+        for label in (self._total, self._pass, self._fail, self._yield):
             label.setStyleSheet("font-size: 20px; font-weight: bold")
+        self._state = QLabel("● Idle")
+        self._state.setStyleSheet("color:#888; font-weight:bold")
+        self._reasons = QLabel("")
+        self._reasons.setWordWrap(True)
+        self._reasons.setStyleSheet("color:#a33")
 
         self._start = QPushButton("Start")
         self._stop = QPushButton("Stop")
         self._teach = QPushButton("Teach…")
         self._teach_files = QPushButton("Teach on images…")
         self._emulate = QPushButton("Emulate folder…")
+        self._review = QPushButton("Review rejects…")
         self._settings = QPushButton("Settings…")
         self._stop.setEnabled(False)
         self._start.clicked.connect(self.start)
@@ -92,15 +104,20 @@ class MainWindow(QMainWindow):
         self._teach.clicked.connect(self.open_teach)
         self._teach_files.clicked.connect(self.open_teach_from_files)
         self._emulate.clicked.connect(self.open_emulate)
+        self._review.clicked.connect(self.open_review)
         self._settings.clicked.connect(self.open_settings)
 
         counters = QGridLayout()
-        counters.addWidget(QLabel("Total"), 0, 0)
-        counters.addWidget(self._total, 0, 1)
-        counters.addWidget(QLabel("Pass"), 1, 0)
-        counters.addWidget(self._pass, 1, 1)
-        counters.addWidget(QLabel("Reject"), 2, 0)
-        counters.addWidget(self._fail, 2, 1)
+        counters.addWidget(self._state, 0, 0, 1, 2)
+        counters.addWidget(QLabel("Total"), 1, 0)
+        counters.addWidget(self._total, 1, 1)
+        counters.addWidget(QLabel("Pass"), 2, 0)
+        counters.addWidget(self._pass, 2, 1)
+        counters.addWidget(QLabel("Reject"), 3, 0)
+        counters.addWidget(self._fail, 3, 1)
+        counters.addWidget(QLabel("Yield"), 4, 0)
+        counters.addWidget(self._yield, 4, 1)
+        counters.addWidget(self._reasons, 5, 0, 1, 2)
 
         buttons = QHBoxLayout()
         buttons.addWidget(self._start)
@@ -108,6 +125,7 @@ class MainWindow(QMainWindow):
         buttons.addWidget(self._teach)
         buttons.addWidget(self._teach_files)
         buttons.addWidget(self._emulate)
+        buttons.addWidget(self._review)
         buttons.addWidget(self._settings)
 
         recipe_row = QHBoxLayout()
@@ -221,13 +239,19 @@ class MainWindow(QMainWindow):
             stats=self._stats,
             live_view=self._live,
             reject_handler=reject,
+            failed_log=self._failed_log,
         )
         self._runner.start()
         self._timer.start()
         self._start.setEnabled(False)
         self._stop.setEnabled(True)
+        self._set_state("Running", "#1a8")
         batch = f" — batch {self._batch_no.text().strip()}" if self._batch_id else ""
         self.statusBar().showMessage(f"Running{batch}")
+
+    def _set_state(self, text: str, color: str) -> None:
+        self._state.setText(f"● {text}")
+        self._state.setStyleSheet(f"color:{color}; font-weight:bold")
 
     def close_batch(self) -> None:
         if self._batch_id is None or self._sf is None:
@@ -265,9 +289,22 @@ class MainWindow(QMainWindow):
             self._runner.join()
             self._runner = None
         self._timer.stop()
+        self._refresh()  # final counter update
         self._start.setEnabled(True)
         self._stop.setEnabled(False)
+        self._set_state("Idle", "#888")
         self.statusBar().showMessage("Stopped")
+
+    def open_review(self) -> None:
+        """Open the reject-review filmstrip over the captured failed images."""
+        if len(self._failed_log) == 0:
+            self.statusBar().showMessage("No rejects to review yet.")
+            return
+        from .review_window import ReviewWindow
+
+        self._review_window = ReviewWindow(self._failed_log, self._recipe, self)
+        self._review_window.resize(900, 600)
+        self._review_window.show()
 
     def open_teach(self) -> None:
         """Acquire a set of product images from the line, then open Teach on them
@@ -387,6 +424,14 @@ class MainWindow(QMainWindow):
         self._total.setText(str(totals["total"]))
         self._pass.setText(str(totals["passed"]))
         self._fail.setText(str(totals["failed"]))
+        self._yield.setText(f"{totals.get('yield', 0.0):.1f} %" if totals["total"] else "—")
+        reasons = self._stats.reject_reasons()
+        if reasons:
+            top = ", ".join(f"{name}×{n}" for name, n in list(reasons.items())[:4])
+            self._reasons.setText(f"Top reject reasons: {top}")
+        else:
+            self._reasons.setText("")
+        self._review.setText(f"Review rejects… ({len(self._failed_log)})")
 
         # auto-stop when a bounded source (e.g. sim/file) has finished
         if self._runner is not None and not self._runner.is_running():

@@ -18,12 +18,14 @@ class FrameArchiver:
     """
 
     def __init__(
-        self, session_factory, directory: str, *, batch_id: int | None = None, policy: str = "fails"
+        self, session_factory, directory: str, *, batch_id: int | None = None,
+        policy: str = "fails", uploader=None,
     ) -> None:
         self._sf = session_factory
         self.directory = directory
         self.batch_id = batch_id
         self.policy = policy
+        self.uploader = uploader  # optional callable(local_path) -> remote ref (FTP/network)
         os.makedirs(directory, exist_ok=True)
 
     def on_frame(self, frame, results) -> None:
@@ -43,6 +45,11 @@ class FrameArchiver:
                 self.directory, f"{frame.camera_id}_f{frame.frame_id:05d}.png"
             )
             Image.fromarray(frame.image).save(image_ref)
+            if self.uploader is not None:  # push to FTP / network archive
+                try:
+                    image_ref = self.uploader(image_ref) or image_ref
+                except Exception:
+                    pass  # never let archiving break the line
 
         with self._sf() as s:
             s.add(

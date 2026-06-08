@@ -22,6 +22,7 @@ dev = ["pytest>=8.0", "ruff>=0.4", "zxing-cpp>=2.2", "qrcode[pil]>=7.4", "rapido
 vis-demo = "vis.cli:main"
 vis-hmi = "vis.hmi.app:main"
 vis-emulate = "vis.runtime.emulate:main"
+vis-backup = "vis.db.backup:main"
 
 [build-system]
 requires = ["setuptools>=68"]

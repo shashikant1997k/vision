@@ -195,9 +195,13 @@ class TeachWindow(QMainWindow):
         self._approve_btn = QPushButton("Approve…")
         self._approve_btn.clicked.connect(self._approve)
         self._approve_btn.setEnabled(False)
+        export_btn = QPushButton("Export…")
+        export_btn.setToolTip("Export this recipe to a JSON file (move it to another station).")
+        export_btn.clicked.connect(self._export)
         actions = QHBoxLayout()
         actions.addWidget(test_btn)
         actions.addWidget(save_btn)
+        actions.addWidget(export_btn)
         actions.addWidget(self._approve_btn)
 
         side = QVBoxLayout()
@@ -777,6 +781,26 @@ class TeachWindow(QMainWindow):
         self._saved_recipe_id = recipe_id
         self._approve_btn.setEnabled(True)
         self._status.setText(f"Saved draft recipe #{recipe_id}")
+
+    def _export(self) -> None:
+        problem = self._validate()
+        if problem:
+            self._status.setText("⚠ " + problem)
+            return
+        from PySide6.QtWidgets import QFileDialog
+
+        from ..db.recipe_io import export_recipe_obj
+
+        name = (self._recipe_name.text().strip() or "recipe").replace(" ", "_")
+        path, _ = QFileDialog.getSaveFileName(self, "Export recipe", f"{name}.json", "Recipe (*.json)")
+        if not path:
+            return
+        try:
+            export_recipe_obj(self._model.to_recipe(), path)
+        except Exception as exc:
+            self._status.setText(f"Export failed: {exc}")
+            return
+        self._status.setText(f"Recipe exported to {path}")
 
     def _approve(self) -> None:
         if self._saved_recipe_id is None:

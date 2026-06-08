@@ -97,6 +97,7 @@ class MainWindow(QMainWindow):
         self._teach_files = QPushButton("Teach on images…")
         self._emulate = QPushButton("Emulate folder…")
         self._review = QPushButton("Review rejects…")
+        self._import = QPushButton("Import recipe…")
         self._settings = QPushButton("Settings…")
         self._stop.setEnabled(False)
         self._start.clicked.connect(self.start)
@@ -105,6 +106,7 @@ class MainWindow(QMainWindow):
         self._teach_files.clicked.connect(self.open_teach_from_files)
         self._emulate.clicked.connect(self.open_emulate)
         self._review.clicked.connect(self.open_review)
+        self._import.clicked.connect(self.import_recipe)
         self._settings.clicked.connect(self.open_settings)
 
         counters = QGridLayout()
@@ -126,6 +128,7 @@ class MainWindow(QMainWindow):
         buttons.addWidget(self._teach_files)
         buttons.addWidget(self._emulate)
         buttons.addWidget(self._review)
+        buttons.addWidget(self._import)
         buttons.addWidget(self._settings)
 
         recipe_row = QHBoxLayout()
@@ -294,6 +297,26 @@ class MainWindow(QMainWindow):
         self._stop.setEnabled(False)
         self._set_state("Idle", "#888")
         self.statusBar().showMessage("Stopped")
+
+    def import_recipe(self) -> None:
+        """Import a recipe JSON file as a new draft (re-approval required)."""
+        if self._sf is None:
+            self.statusBar().showMessage("No database — cannot import recipes.")
+            return
+        from PySide6.QtWidgets import QFileDialog
+
+        from ..db.recipe_io import import_recipe
+
+        path, _ = QFileDialog.getOpenFileName(self, "Import recipe", "", "Recipe (*.json)")
+        if not path:
+            return
+        try:
+            new_id = import_recipe(self._sf, path, self._user_id)
+        except Exception as exc:
+            self.statusBar().showMessage(f"Import failed: {exc}")
+            return
+        self._reload_recipes()
+        self.statusBar().showMessage(f"Imported recipe as draft #{new_id} — approve it to use on the line.")
 
     def open_review(self) -> None:
         """Open the reject-review filmstrip over the captured failed images."""

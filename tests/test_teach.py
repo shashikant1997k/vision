@@ -316,6 +316,8 @@ def test_teach_add_general_tools(tmp_path):
     # editing the name must NOT wipe a general tool's config
     win._selected = ("tool", 0, 0)
     win._load_properties()
+    assert win._t_mode.isHidden()  # Read-only rows hidden for a general tool
+    assert "covered" in win._t_lastread.text()  # plain-English settings summary
     win._t_name.setText("cap_present")
     win._tool_edited()
     assert win._model.regions[0].tools[0].config.get("mode") == "present"

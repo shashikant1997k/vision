@@ -148,17 +148,40 @@ class TeachWindow(QMainWindow):
         name_form = QFormLayout()
         name_form.addRow("Recipe name", self._recipe_name)
 
-        # --- palette ---
+        # --- palette (grouped: Read | Measure & check | Layout) ---
         palette = QGroupBox("Add inspection")
         palette_layout = QVBoxLayout()
-        for definition in INSPECTION_TYPES:
-            btn = QPushButton(definition["label"])
-            btn.clicked.connect(lambda _checked, k=definition["key"]: self._arm_tool(k))
+        palette_layout.setSpacing(3)
+
+        def _section(title):
+            lbl = QLabel(title)
+            lbl.setStyleSheet("color:#667; font-weight:bold; margin-top:4px")
+            palette_layout.addWidget(lbl)
+
+        def _palette_btn(label, key, tip=""):
+            btn = QPushButton(label)
+            btn.setStyleSheet("text-align:left; padding:5px 8px")
+            if tip:
+                btn.setToolTip(tip)
+            btn.clicked.connect(lambda _checked, k=key: self._arm_tool(k))
             palette_layout.addWidget(btn)
+
+        _section("Read")
+        for d in INSPECTION_TYPES:
+            if d.get("category") == "read":
+                _palette_btn(d["label"], d["key"])
+        _section("Measure & check")
+        for d in INSPECTION_TYPES:
+            if d.get("category") == "inspect":
+                _palette_btn(d["label"], d["key"])
+
+        _section("Layout")
         add_area = QPushButton("+ Add another product / area")
+        add_area.setStyleSheet("text-align:left; padding:5px 8px")
         add_area.clicked.connect(self._arm_region)
         palette_layout.addWidget(add_area)
         self._locator_btn = QPushButton("Set part locator (follows the part)")
+        self._locator_btn.setStyleSheet("text-align:left; padding:5px 8px")
         self._locator_btn.setToolTip(
             "Draw a box around a distinctive, fixed feature (logo/edge/corner). "
             "Inspections then follow the part as it shifts on the line."
@@ -371,10 +394,20 @@ class TeachWindow(QMainWindow):
         form.addRow("Engine", self._t_reader)
         form.addRow("", self._t_required)
         form.addRow("Last read", self._t_lastread)
+        self._tool_form = form
+        # rows that only apply to Read (code/text) inspections
+        self._match_rows = [
+            self._t_mode, self._t_value, self._t_field,
+            self._t_rotation, self._t_minconf, self._t_reader, self._t_required,
+        ]
         w = QWidget()
         w.setLayout(form)
         w.hide()
         return w
+
+    def _set_match_rows_visible(self, visible: bool) -> None:
+        for widget in self._match_rows:
+            self._tool_form.setRowVisible(widget, visible)
 
     def _sync_tool_inputs(self, mode: str) -> None:
         self._t_value.setEnabled(mode != BATCH_FIELD)
@@ -589,24 +622,17 @@ class TeachWindow(QMainWindow):
             self._t_name.setText(tool.tool_id)
             self._t_type.setText(_FRIENDLY.get(tool.tool_type, tool.tool_type))
             if tool.tool_type not in MATCH_TOOLS:
-                # general tool (presence/measure/colour/template): name editable,
-                # settings shown read-only (config came from sensible defaults)
-                import json
-
-                self._t_mode.setEnabled(False)
-                self._t_value.setEnabled(False)
-                for w in (self._t_field, self._t_rotation, self._t_minconf, self._t_reader, self._t_required):
-                    w.setEnabled(False)
-                self._t_lastread.setText("Settings: " + json.dumps(tool.config or {}))
+                # general tool (presence/measure/colour/template): hide the Read-only
+                # rows; show name + a plain-English settings summary
+                self._set_match_rows_visible(False)
+                self._tool_form.labelForField(self._t_lastread).setText("Settings")
+                self._t_lastread.setText(_describe_config(tool.tool_type, tool.config or {}))
                 self._product_props.hide()
                 self._tool_props.show()
                 self._loading = False
                 return
-            for w in (
-                self._t_mode, self._t_value, self._t_field, self._t_rotation,
-                self._t_minconf, self._t_reader, self._t_required,
-            ):
-                w.setEnabled(True)
+            self._set_match_rows_visible(True)
+            self._tool_form.labelForField(self._t_lastread).setText("Last read")
             info = read_config(tool.tool_type, tool.config)
             self._t_mode.clear()
             self._t_mode.addItems(modes_for(tool.tool_type))
@@ -897,3 +923,21 @@ def _disp(value) -> str:
     if value is None:
         return ""
     return str(value).replace("\x1d", "<GS>")
+
+
+def _describe_config(tool_type: str, config: dict) -> str:
+    """Plain-English summary of a general tool's settings."""
+    if tool_type == "presence":
+        pct = int(config.get("min_coverage", 0.05) * 100)
+        return f"{config.get('mode', 'present').title()} if ≥ {pct}% of the box is covered"
+    if tool_type == "measure":
+        return (
+            f"{config.get('axis', 'width').title()} must be "
+            f"{config.get('min_px', 0)}–{config.get('max_px', 0)} px"
+        )
+    if tool_type == "color_check":
+        t = config.get("target", [0, 0, 0])
+        return f"Colour ≈ rgb({t[0]},{t[1]},{t[2]}) ± {config.get('tolerance', 40)}"
+    if tool_type == "template_match":
+        return f"Must match the captured template ≥ {config.get('min_score', 0.6)}"
+    return str(config)

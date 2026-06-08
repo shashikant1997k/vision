@@ -17,16 +17,18 @@ INSPECTION_TYPES = [
         "key": "code_verify",
         "label": "Read Code (1D/2D / GS1)",
         "expected_label": "Expected code data (blank = accept any readable code)",
+        "category": "read",
     },
     {
         "key": "ocv_text",
         "label": "Read Text (OCR)",
         "expected_label": "Expected text, e.g. LOT42",
+        "category": "read",
     },
-    {"key": "presence", "label": "Presence / Absence", "expected_label": ""},
-    {"key": "measure", "label": "Measure (size)", "expected_label": ""},
-    {"key": "color_check", "label": "Colour check", "expected_label": ""},
-    {"key": "template_match", "label": "Match template (artwork)", "expected_label": ""},
+    {"key": "presence", "label": "Presence / Absence", "expected_label": "", "category": "inspect"},
+    {"key": "measure", "label": "Measure (size)", "expected_label": "", "category": "inspect"},
+    {"key": "color_check", "label": "Colour check", "expected_label": "", "category": "inspect"},
+    {"key": "template_match", "label": "Match template (artwork)", "expected_label": "", "category": "inspect"},
 ]
 
 # Tool types whose pass/fail is value/match based (the properties panel edits them).

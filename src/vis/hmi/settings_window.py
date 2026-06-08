@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QFormLayout,
@@ -21,6 +22,8 @@ from ..camera import (
     Calibration,
     CameraSettings,
     FocusAssist,
+    LightingConfig,
+    SensorROI,
     TriggerConfig,
     TriggerMode,
 )
@@ -96,11 +99,70 @@ class CameraSettingsWindow(QMainWindow):
         )
         self._trigger_source = QLineEdit(settings.trigger.source)
         self._trigger_source.setPlaceholderText("e.g. Line1 or EncoderA/B")
+        self._trig_delay = QSpinBox()
+        self._trig_delay.setRange(0, 1_000_000)
+        self._trig_delay.setSuffix(" µs")
+        self._trig_delay.setValue(settings.trigger.delay_us)
+        self._trig_delay.setToolTip("Delay from the trigger signal to acquisition.")
+        self._trig_divider = QSpinBox()
+        self._trig_divider.setRange(1, 100_000)
+        self._trig_divider.setValue(settings.trigger.divider)
+        self._trig_divider.setToolTip("Encoder pulses per trigger (line-speed-independent capture).")
         trigger_form = QFormLayout()
         trigger_form.addRow("Mode", self._trigger_mode)
         trigger_form.addRow("Source", self._trigger_source)
+        trigger_form.addRow("Trigger delay", self._trig_delay)
+        trigger_form.addRow("Encoder divider", self._trig_divider)
         trigger_box = QGroupBox("Trigger")
         trigger_box.setLayout(trigger_form)
+
+        # --- lighting / strobe ---
+        self._light_bright = QSpinBox()
+        self._light_bright.setRange(0, 100)
+        self._light_bright.setSuffix(" %")
+        self._light_bright.setValue(settings.lighting.brightness)
+        self._light_strobe = QCheckBox("Strobe synced to trigger / exposure")
+        self._light_strobe.setChecked(settings.lighting.strobe)
+        self._light_delay = QSpinBox()
+        self._light_delay.setRange(0, 1_000_000)
+        self._light_delay.setSuffix(" µs")
+        self._light_delay.setValue(settings.lighting.strobe_delay_us)
+        self._light_width = QSpinBox()
+        self._light_width.setRange(0, 1_000_000)
+        self._light_width.setSuffix(" µs")
+        self._light_width.setValue(settings.lighting.strobe_width_us)
+        self._light_channel = QLineEdit(settings.lighting.channel)
+        self._light_channel.setPlaceholderText("controller channel / id")
+        light_form = QFormLayout()
+        light_form.addRow("Brightness", self._light_bright)
+        light_form.addRow("", self._light_strobe)
+        light_form.addRow("Strobe delay", self._light_delay)
+        light_form.addRow("Strobe width", self._light_width)
+        light_form.addRow("Channel", self._light_channel)
+        light_box = QGroupBox("Lighting / strobe")
+        light_box.setLayout(light_form)
+
+        # --- sensor window (AOI) ---
+        self._aoi_x = QSpinBox()
+        self._aoi_y = QSpinBox()
+        self._aoi_w = QSpinBox()
+        self._aoi_h = QSpinBox()
+        for spin, val in (
+            (self._aoi_x, settings.sensor_roi.x),
+            (self._aoi_y, settings.sensor_roi.y),
+            (self._aoi_w, settings.sensor_roi.w),
+            (self._aoi_h, settings.sensor_roi.h),
+        ):
+            spin.setRange(0, 100_000)
+            spin.setSuffix(" px")
+            spin.setValue(val)
+        aoi_form = QFormLayout()
+        aoi_form.addRow("X", self._aoi_x)
+        aoi_form.addRow("Y", self._aoi_y)
+        aoi_form.addRow("Width (0 = full)", self._aoi_w)
+        aoi_form.addRow("Height (0 = full)", self._aoi_h)
+        aoi_box = QGroupBox("Sensor window (AOI)")
+        aoi_box.setLayout(aoi_form)
 
         # --- image / transport ---
         self._fps = QDoubleSpinBox()
@@ -114,9 +176,14 @@ class CameraSettingsWindow(QMainWindow):
         self._packet.setRange(576, 9000)
         self._packet.setValue(settings.packet_size)
         self._packet.setToolTip("GigE packet size. Use 9000 (jumbo frames) for reliable high-bandwidth capture.")
+        self._gamma = QDoubleSpinBox()
+        self._gamma.setRange(0.1, 4.0)
+        self._gamma.setSingleStep(0.1)
+        self._gamma.setValue(settings.gamma)
         image_form = QFormLayout()
         image_form.addRow("Frame rate", self._fps)
         image_form.addRow("White balance", self._wb)
+        image_form.addRow("Gamma", self._gamma)
         image_form.addRow("Packet size", self._packet)
         image_box = QGroupBox("Image / transport")
         image_box.setLayout(image_form)
@@ -157,7 +224,9 @@ class CameraSettingsWindow(QMainWindow):
 
         side = QVBoxLayout()
         side.addWidget(exposure_box)
+        side.addWidget(light_box)
         side.addWidget(trigger_box)
+        side.addWidget(aoi_box)
         side.addWidget(image_box)
         side.addLayout(buttons)
         side.addWidget(cal_box)
@@ -196,9 +265,25 @@ class CameraSettingsWindow(QMainWindow):
             frame_rate=self._fps.value(),
             white_balance=self._wb.currentText(),
             packet_size=self._packet.value(),
+            gamma=self._gamma.value(),
+            sensor_roi=SensorROI(
+                x=self._aoi_x.value(),
+                y=self._aoi_y.value(),
+                w=self._aoi_w.value(),
+                h=self._aoi_h.value(),
+            ),
             trigger=TriggerConfig(
                 mode=TriggerMode(self._trigger_mode.currentText()),
                 source=self._trigger_source.text(),
+                delay_us=self._trig_delay.value(),
+                divider=self._trig_divider.value(),
+            ),
+            lighting=LightingConfig(
+                brightness=self._light_bright.value(),
+                strobe=self._light_strobe.isChecked(),
+                strobe_delay_us=self._light_delay.value(),
+                strobe_width_us=self._light_width.value(),
+                channel=self._light_channel.text(),
             ),
         )
 

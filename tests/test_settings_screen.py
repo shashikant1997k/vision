@@ -38,6 +38,26 @@ def test_settings_from_form_roundtrip():
     assert settings.trigger.source == "EncoderA/B"
 
 
+def test_settings_lighting_aoi_trigger_roundtrip():
+    _qapp()
+    win = CameraSettingsWindow(image_provider=lambda: None, settings=CameraSettings())
+    win._light_bright.setValue(60)
+    win._light_strobe.setChecked(True)
+    win._light_width.setValue(1500)
+    win._trig_delay.setValue(120)
+    win._trig_divider.setValue(8)
+    win._aoi_w.setValue(1280)
+    win._aoi_h.setValue(960)
+    win._gamma.setValue(1.8)
+    s = win.settings_from_form()
+    assert s.lighting.brightness == 60 and s.lighting.strobe is True and s.lighting.strobe_width_us == 1500
+    assert s.trigger.delay_us == 120 and s.trigger.divider == 8
+    assert (s.sensor_roi.w, s.sensor_roi.h) == (1280, 960)
+    assert s.gamma == 1.8
+    # survives a serialize round-trip (persisted per station)
+    assert CameraSettings.from_dict(s.to_dict()).lighting.strobe is True
+
+
 def test_focus_readout_updates():
     _qapp()
     win = CameraSettingsWindow(image_provider=_sharp_image)

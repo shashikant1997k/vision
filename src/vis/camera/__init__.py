@@ -19,7 +19,7 @@ from .focus import FocusAssist, focus_score
 from .file_source import FileCamera
 from .lighting import DigitalIOLight, LightController, LightMode, LightSettings, SimulatedLightController
 from .manager import CameraManager
-from .settings import CameraSettings, SensorROI, TriggerConfig, TriggerMode
+from .settings import CameraSettings, LightingConfig, SensorROI, TriggerConfig, TriggerMode
 
 __all__ = [
     "Calibration",
@@ -34,6 +34,7 @@ __all__ = [
     "HarvesterDiscovery",
     "focus_score",
     "LightController",
+    "LightingConfig",
     "LightMode",
     "LightSettings",
     "SensorROI",

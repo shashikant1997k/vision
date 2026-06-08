@@ -84,12 +84,14 @@ class MainWindow(QMainWindow):
         self._stop = QPushButton("Stop")
         self._teach = QPushButton("Teach…")
         self._teach_files = QPushButton("Teach on images…")
+        self._emulate = QPushButton("Emulate folder…")
         self._settings = QPushButton("Settings…")
         self._stop.setEnabled(False)
         self._start.clicked.connect(self.start)
         self._stop.clicked.connect(self.stop)
         self._teach.clicked.connect(self.open_teach)
         self._teach_files.clicked.connect(self.open_teach_from_files)
+        self._emulate.clicked.connect(self.open_emulate)
         self._settings.clicked.connect(self.open_settings)
 
         counters = QGridLayout()
@@ -105,6 +107,7 @@ class MainWindow(QMainWindow):
         buttons.addWidget(self._stop)
         buttons.addWidget(self._teach)
         buttons.addWidget(self._teach_files)
+        buttons.addWidget(self._emulate)
         buttons.addWidget(self._settings)
 
         recipe_row = QHBoxLayout()
@@ -310,6 +313,31 @@ class MainWindow(QMainWindow):
             return
         self.statusBar().showMessage(f"Loaded {len(images)} image(s) for teaching")
         self._open_teach_with_images(images)
+
+    def open_emulate(self) -> None:
+        """Run the selected recipe over a folder of saved images (offline playback):
+        sorts annotated pass/fail images and writes results.csv."""
+        from pathlib import Path
+
+        from PySide6.QtWidgets import QFileDialog
+
+        from ..runtime.emulate import emulate_folder
+
+        folder = QFileDialog.getExistingDirectory(self, "Select a folder of product images")
+        if not folder:
+            return
+        recipe, _ = self._resolve_recipe()
+        out = Path(folder) / "emulation_results"
+        self.statusBar().showMessage("Emulating… (running the recipe over the folder)")
+        try:
+            summary = emulate_folder(recipe, folder, out)
+        except Exception as exc:
+            self.statusBar().showMessage(f"Emulation failed: {exc}")
+            return
+        self.statusBar().showMessage(
+            f"Emulated {summary.total} images: {summary.passed} pass, "
+            f"{summary.failed} fail — annotated images + results.csv in {out}"
+        )
 
     def _open_teach_with_images(self, images) -> None:
         from .teach_window import TeachWindow

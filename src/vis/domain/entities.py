@@ -21,6 +21,20 @@ class ToolSpec:
 
 
 @dataclass
+class Fixture:
+    """Part locator: a template taught from the master image. At runtime the
+    template is found in each frame and the offset is applied to every ROI in the
+    region, so inspections follow the part as it shifts (part-location/fixturing).
+    """
+
+    template: bytes  # PNG-encoded grayscale template patch
+    anchor_x: int  # template's taught top-left X in the frame
+    anchor_y: int  # template's taught top-left Y in the frame
+    search_margin: int = 80  # how far around the anchor to search
+    min_score: float = 0.5  # min match score to trust the location
+
+
+@dataclass
 class Region:
     """One product position within a single camera FOV (a track/lane)."""
 
@@ -30,6 +44,7 @@ class Region:
     reject_output: str  # which reject lane this region routes to
     tools: list[ToolSpec] = field(default_factory=list)
     pass_logic: str = "all"  # "all" required inspections pass, or "any" passes
+    fixture: Fixture | None = None  # optional part locator
 
 
 @dataclass

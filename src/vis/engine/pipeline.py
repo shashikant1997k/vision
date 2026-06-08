@@ -30,7 +30,16 @@ class InspectionPipeline:
             image = rotate_image(image, rotation)
         tasks: list[ToolTask] = []
         for region in self.recipe.regions:
-            region_img = crop(image, region.roi)
+            roi = region.roi
+            fixture = getattr(region, "fixture", None)
+            if fixture is not None:
+                from ..common.types import ROI
+                from ..runtime.locator import locate
+
+                dx, dy, score = locate(image, fixture)
+                if score >= fixture.min_score and (dx or dy):
+                    roi = ROI(roi.x + dx, roi.y + dy, roi.w, roi.h)  # follow the part
+            region_img = crop(image, roi)
             for tool in region.tools:
                 roi_img = crop(region_img, tool.roi)
                 tasks.append(

@@ -4,6 +4,7 @@ import numpy as np
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -14,6 +15,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMainWindow,
     QPushButton,
+    QScrollArea,
     QSpinBox,
     QTreeWidget,
     QTreeWidgetItem,
@@ -99,7 +101,7 @@ class TeachWindow(QMainWindow):
         prev_btn.clicked.connect(self._prev_image)
         next_btn = QPushButton("Next ▶")
         next_btn.clicked.connect(self._next_image)
-        rotate_btn = QPushButton("Rotate image ⟳")
+        rotate_btn = QPushButton("Rotate ⟳")
         rotate_btn.setToolTip("Rotate the whole image (for a sideways-mounted camera / photo).")
         rotate_btn.clicked.connect(self._rotate_image)
         zoom_in = QPushButton("➕")
@@ -115,7 +117,8 @@ class TeachWindow(QMainWindow):
         fit_btn.setToolTip("Reset zoom to fit")
         fit_btn.clicked.connect(self._image.reset_view)
         self._image.zoomChanged.connect(lambda z: self._zoom_label.setText(f"{int(z * 100)}%"))
-        test_all_btn = QPushButton("Test all images")
+        test_all_btn = QPushButton("Test all")
+        test_all_btn.setToolTip("Run the recipe over all captured/loaded images.")
         test_all_btn.clicked.connect(self._test_all)
         film = QHBoxLayout()
         film.addWidget(prev_btn)
@@ -216,18 +219,48 @@ class TeachWindow(QMainWindow):
         side.addWidget(self._status)
         side_widget = QWidget()
         side_widget.setLayout(side)
+        # bound the panel width and let it scroll, so long read values can never
+        # push the window off-screen
+        side_scroll = QScrollArea()
+        side_scroll.setWidget(side_widget)
+        side_scroll.setWidgetResizable(True)
+        side_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        side_scroll.setMinimumWidth(320)
+        side_scroll.setMaximumWidth(430)
 
         root = QHBoxLayout()
-        root.addWidget(left_widget, 3)
-        root.addWidget(side_widget, 2)
+        root.addWidget(left_widget, 1)
+        root.addWidget(side_scroll, 0)
         central = QWidget()
         central.setLayout(root)
         self.setCentralWidget(central)
+
+        # long read values must wrap/clip, never widen the panel
+        self._status.setMaximumWidth(430)
+        self._t_lastread.setMaximumWidth(320)
 
         self._rebuild_tree()
         self._set_guide("Click <b>Read Code</b> or <b>Read Text</b>, then drag a box on the image.")
         self._update_img_label()
         self._refresh_view()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._clamp_to_screen()
+
+    def _clamp_to_screen(self) -> None:
+        screen = self.screen() or QApplication.primaryScreen()
+        if screen is None:
+            return
+        avail = screen.availableGeometry()
+        w = min(self.width(), avail.width() - 40)
+        h = min(self.height(), avail.height() - 40)
+        if w != self.width() or h != self.height():
+            self.resize(w, h)
+        self.move(
+            max(avail.left() + 10, min(self.x(), avail.right() - w - 10)),
+            max(avail.top() + 10, min(self.y(), avail.bottom() - h - 10)),
+        )
 
     # ---- captured-image bank (filmstrip) ----------------------------------
     def _update_img_label(self) -> None:

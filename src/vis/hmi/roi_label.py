@@ -49,7 +49,7 @@ class ImageRoiLabel(QLabel):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setMinimumSize(560, 380)
+        self.setMinimumSize(400, 320)
         self.setAlignment(Qt.AlignCenter)
         self.setStyleSheet("background:#111")
         self.setMouseTracking(True)

@@ -89,6 +89,7 @@ class MainWindow(QMainWindow):
         self._state.setStyleSheet("color:#888; font-weight:bold")
         self._reasons = QLabel("")
         self._reasons.setWordWrap(True)
+        self._reasons.setMaximumWidth(360)
         self._reasons.setStyleSheet("color:#a33")
 
         self._start = QPushButton("Start")

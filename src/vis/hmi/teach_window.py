@@ -99,6 +99,19 @@ class TeachWindow(QMainWindow):
         rotate_btn = QPushButton("Rotate image ⟳")
         rotate_btn.setToolTip("Rotate the whole image (for a sideways-mounted camera / photo).")
         rotate_btn.clicked.connect(self._rotate_image)
+        zoom_in = QPushButton("➕")
+        zoom_in.setFixedWidth(34)
+        zoom_in.setToolTip("Zoom in (or scroll the mouse wheel over the image)")
+        zoom_in.clicked.connect(lambda: self._image.zoom_by(1.25))
+        zoom_out = QPushButton("➖")
+        zoom_out.setFixedWidth(34)
+        zoom_out.setToolTip("Zoom out")
+        zoom_out.clicked.connect(lambda: self._image.zoom_by(1 / 1.25))
+        self._zoom_label = QLabel("100%")
+        fit_btn = QPushButton("Fit")
+        fit_btn.setToolTip("Reset zoom to fit")
+        fit_btn.clicked.connect(self._image.reset_view)
+        self._image.zoomChanged.connect(lambda z: self._zoom_label.setText(f"{int(z * 100)}%"))
         test_all_btn = QPushButton("Test all images")
         test_all_btn.clicked.connect(self._test_all)
         film = QHBoxLayout()
@@ -106,6 +119,10 @@ class TeachWindow(QMainWindow):
         film.addWidget(self._img_label)
         film.addWidget(next_btn)
         film.addWidget(rotate_btn)
+        film.addWidget(zoom_out)
+        film.addWidget(self._zoom_label)
+        film.addWidget(zoom_in)
+        film.addWidget(fit_btn)
         film.addStretch(1)
         film.addWidget(test_all_btn)
         film_widget = QWidget()
@@ -209,6 +226,7 @@ class TeachWindow(QMainWindow):
         self._reference_index = index % len(self._bank)
         self._reference = self._bank[self._reference_index]
         self._last_results = None
+        self._image.reset_view()  # back to fit when switching images
         self._update_img_label()
         self._refresh_view()
 
@@ -627,11 +645,54 @@ class TeachWindow(QMainWindow):
                     else:
                         detail = " — not matched"
                 lines.append(f"   {mark} {tr.tool_id}: read “{read}”{detail}")
+        lines += self._locator_diagnostics()
         return "\n".join(lines)
+
+    def _locator_diagnostics(self) -> list[str]:
+        """Report, per product with a part locator, whether the locator found the
+        feature on the current image and how strongly."""
+        from ..runtime.locator import locate
+
+        out = []
+        teach = self._teach_image()
+        for region in self._model.regions:
+            fixture = getattr(region, "fixture", None)
+            if fixture is None:
+                continue
+            dx, dy, score = locate(teach, fixture)
+            if score >= fixture.min_score:
+                out.append(f"   ⌖ {region.name} locator: found (score {score:.2f}, shift {dx:+d},{dy:+d}px)")
+            else:
+                out.append(
+                    f"   ⌖ {region.name} locator: WEAK/NOT FOUND (score {score:.2f}) — "
+                    "use a more distinctive feature"
+                )
+        return out
+
+    def _validate(self) -> str | None:
+        """Return a human message if the recipe isn't ready to save, else None."""
+        if not self._recipe_name.text().strip():
+            return "Enter a recipe name before saving."
+        if not any(r.tools for r in self._model.regions):
+            return "Add at least one inspection (Read Code / Read Text) before saving."
+        for region in self._model.regions:
+            for tool in region.tools:
+                cfg = tool.config or {}
+                if cfg.get("match") == "exact" and not (cfg.get("expected") or "").strip():
+                    return f"Inspection '{tool.tool_id}' is Fixed value but its value is empty."
+                if cfg.get("match") == "regex" and not (cfg.get("pattern") or "").strip():
+                    return f"Inspection '{tool.tool_id}' is Matches pattern but no pattern is set."
+                if cfg.get("expected_data") == "" and "pattern" not in cfg and cfg.get("gs1") and False:
+                    pass  # code 'Any readable' is valid with empty value
+        return None
 
     def _save(self) -> None:
         if self._sf is None:
             self._status.setText("No database configured — cannot save.")
+            return
+        problem = self._validate()
+        if problem:
+            self._status.setText("⚠ " + problem)
             return
         from ..db.store import RecipeRepository
 

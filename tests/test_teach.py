@@ -266,6 +266,41 @@ def test_teach_batch_field_and_rotation(tmp_path):
     assert win._model.regions[0].tools[0].config.get("rotation") == 90
 
 
+def test_teach_save_validation_blocks_bad_recipes(tmp_path):
+    pytest.importorskip("PySide6")
+    _qapp()
+    sf, qa_id = _qa_setup(tmp_path)
+    win = _teach_window(sf, qa_id)
+
+    win._save()  # no name, no inspections
+    assert win._saved_recipe_id is None and "name" in win._status.text().lower()
+
+    win._recipe_name.setText("Recipe A")
+    win._save()  # name but no inspections
+    assert win._saved_recipe_id is None and "inspection" in win._status.text().lower()
+
+    win._arm_tool("ocv_text")
+    win._on_roi_drawn(10, 10, 80, 24)
+    win._t_mode.setCurrentText("Fixed value")  # fixed but empty value
+    win._save()
+    assert win._saved_recipe_id is None and "empty" in win._status.text().lower()
+
+    win._t_value.setText("LOT42")
+    win._save()  # now valid
+    assert win._saved_recipe_id is not None
+
+
+def test_teach_zoom_and_fit():
+    pytest.importorskip("PySide6")
+    _qapp()
+    win = _teach_window(None, 1)
+    win._image.resize(600, 400)
+    win._image.zoom_by(1.25)
+    assert win._image._zoom > 1.0
+    win._image.reset_view()
+    assert win._image._zoom == 1.0 and win._image._pan_x == 0.0
+
+
 def test_teach_set_part_locator(tmp_path):
     pytest.importorskip("PySide6")
     pytest.importorskip("cv2")
@@ -301,6 +336,7 @@ def test_teach_draw_test_save_approve(tmp_path):
     from vis.db.store import RecipeRepository
 
     win = _teach_window(sf, qa_id)
+    win._recipe_name.setText("Demo Recipe")        # required before save
     win._arm_tool("code_verify")
     win._on_roi_drawn(30, 30, 300, 300)
     win._t_mode.setCurrentText("Fixed value")     # static code

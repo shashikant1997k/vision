@@ -8,10 +8,13 @@ concrete implementation that drives the ejector.
 """
 
 from .digital_io import DigitalIO, ModbusTcpIO, SimulatedIO
+from .encoder_reject import EncoderRejectConfig, EncoderRejectController
 from .reject import RejectController, RejectOutputConfig
 
 __all__ = [
     "DigitalIO",
+    "EncoderRejectConfig",
+    "EncoderRejectController",
     "ModbusTcpIO",
     "RejectController",
     "RejectOutputConfig",

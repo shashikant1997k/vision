@@ -12,7 +12,8 @@ codes = ["zxing-cpp>=2.2"]        # 1D/2D decode: DataMatrix, QR, Code128, ... (
 ocr = ["rapidocr-onnxruntime>=1.2"]  # ONNX PaddleOCR (PP-OCR) for OCV text (docs/05)
 engine = ["onnxruntime>=1.17", "opencv-python>=4.9"]
 camera = ["harvesters>=1.4"]      # GenICam/GigE acquisition (Windows; see D-011)
-io = ["pymodbus>=3.5"]            # digital reject I/O over Modbus TCP (line hardware)
+io = ["pymodbus>=3.5"]            # digital reject I/O + Modbus PLC link (line hardware)
+plc = ["pycomm3>=1.2"]            # EtherNet/IP (Allen-Bradley / CIP) PLC link
 hmi = ["PySide6>=6.6"]           # Qt desktop HMI (the line operator interface, D-015)
 postgres = ["psycopg[binary]>=3.1", "alembic>=1.13"]  # production DB driver + migrations (D-013)
 dev = ["pytest>=8.0", "ruff>=0.4", "zxing-cpp>=2.2", "qrcode[pil]>=7.4", "rapidocr-onnxruntime>=1.2"]

@@ -48,6 +48,7 @@ class MainWindow(QMainWindow):
         self._camera_factory = camera_factory
         self._camera_id = camera_id
         self._camera_ids = list(camera_ids) if camera_ids else [camera_id]
+        self._cam_recipes: dict = {}
         self._sf = session_factory
         self._user_id = user_id
         self._report_dir = report_dir
@@ -148,7 +149,15 @@ class MainWindow(QMainWindow):
         recipe_row.addWidget(self._recipe_combo, 1)
         recipe_row.addWidget(self._reload_btn)
         job_form = QFormLayout()
-        job_form.addRow("Recipe", recipe_row)
+        # primary recipe (cam 1); each extra camera gets its own recipe selector
+        self._cam_recipe_combos = {self._camera_ids[0]: self._recipe_combo}
+        multi = len(self._camera_ids) > 1
+        job_form.addRow("Recipe " + (self._camera_ids[0] if multi else ""), recipe_row)
+        for cid in self._camera_ids[1:]:
+            combo = QComboBox()
+            self._cam_recipe_combos[cid] = combo
+            job_form.addRow(f"Recipe {cid}", combo)
+        self._reload_recipes()  # populate the per-camera combos now they exist
         job_form.addRow("Batch", self._batch_no)
 
         side = QVBoxLayout()
@@ -174,20 +183,24 @@ class MainWindow(QMainWindow):
         self._timer.timeout.connect(self._refresh)
 
     def _reload_recipes(self) -> None:
-        """Repopulate the recipe selector from the DB (built-in demo + approved)."""
-        current = self._recipe_combo.currentData()
-        self._recipe_combo.blockSignals(True)
-        self._recipe_combo.clear()
-        self._recipe_combo.addItem("Demo (built-in)", None)
+        """Repopulate every camera's recipe selector from the DB (demo + approved)."""
+        combos = list(getattr(self, "_cam_recipe_combos", {}).values()) or [self._recipe_combo]
+        items = [("Demo (built-in)", None)]
         if self._sf is not None:
             from ..db.store import RecipeRepository
 
             for rid, name, version in RecipeRepository(self._sf).list_approved():
-                self._recipe_combo.addItem(f"{name} v{version}", rid)
-        idx = self._recipe_combo.findData(current)
-        if idx >= 0:
-            self._recipe_combo.setCurrentIndex(idx)
-        self._recipe_combo.blockSignals(False)
+                items.append((f"{name} v{version}", rid))
+        for combo in combos:
+            current = combo.currentData()
+            combo.blockSignals(True)
+            combo.clear()
+            for label, data in items:
+                combo.addItem(label, data)
+            idx = combo.findData(current)
+            if idx >= 0:
+                combo.setCurrentIndex(idx)
+            combo.blockSignals(False)
 
     def changeEvent(self, event) -> None:
         from PySide6.QtCore import QEvent
@@ -196,14 +209,18 @@ class MainWindow(QMainWindow):
             self._reload_recipes()  # refresh after returning from the teach window
         super().changeEvent(event)
 
-    def _resolve_recipe(self):
-        """Return (domain_recipe, recipe_db_id|None) for the selected recipe."""
-        recipe_db_id = self._recipe_combo.currentData()
+    def _resolve_recipe_for(self, combo):
+        """Return (domain_recipe, recipe_db_id|None) for a recipe selector."""
+        recipe_db_id = combo.currentData()
         if recipe_db_id is None or self._sf is None:
             return self._recipe, None
         from ..db.store import RecipeRepository
 
         return RecipeRepository(self._sf).load(recipe_db_id), recipe_db_id
+
+    def _resolve_recipe(self):
+        """The primary (cam 1) recipe — used for teach/emulate/settings."""
+        return self._resolve_recipe_for(self._recipe_combo)
 
     def start(self) -> None:
         if self._runner is not None:
@@ -242,10 +259,24 @@ class MainWindow(QMainWindow):
                 bus.subscribe("inspection.result", ResultStore(self._sf, batch_id=self._batch_id).on_result)
                 self._close_batch.setEnabled(True)
 
-        assignments = [
-            (self._camera_factory(cid, None, self._recipe), self._recipe) for cid in self._camera_ids
-        ]
-        lanes = sorted({region.reject_output for region in self._recipe.regions})
+        # build one assignment per camera, each with its own selected recipe
+        # (the primary recipe drives the batch; batch values apply to all cameras)
+        from ..runtime.resolve import resolve_batch_fields
+
+        self._cam_recipes = {}
+        assignments = []
+        for cid in self._camera_ids:
+            if cid == self._camera_ids[0]:
+                cam_recipe = self._recipe  # already resolved above
+            else:
+                cam_recipe, _ = self._resolve_recipe_for(self._cam_recipe_combos[cid])
+                if variable_data:
+                    cam_recipe = resolve_batch_fields(cam_recipe, variable_data)
+            self._cam_recipes[cid] = cam_recipe
+            assignments.append((self._camera_factory(cid, None, cam_recipe), cam_recipe))
+        lanes = sorted(
+            {r.reject_output for rec in self._cam_recipes.values() for r in rec.regions}
+        )
         reject = RejectController(
             [RejectOutputConfig(lane, channel=i + 1) for i, lane in enumerate(lanes)],
             io=SimulatedIO(),
@@ -455,7 +486,8 @@ class MainWindow(QMainWindow):
             latest = self._live.latest(cid)
             if latest is not None:
                 frame, results = latest
-                annotated = draw_overlay(frame.image, self._recipe, results)
+                recipe = self._cam_recipes.get(cid, self._recipe)
+                annotated = draw_overlay(frame.image, recipe, results)
                 pixmap = numpy_to_qpixmap(annotated)
                 label.setPixmap(
                     pixmap.scaled(label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)

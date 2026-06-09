@@ -92,6 +92,46 @@ def test_main_window_multi_camera(qapp):
     window.stop()
 
 
+def test_main_window_per_camera_recipes(qapp, tmp_path):
+    pytest.importorskip("qrcode")
+    from vis.cli import build_code_demo_recipe, build_ocr_demo_recipe
+    from vis.db.base import init_db, make_engine, make_session_factory
+    from vis.db.store import RecipeRepository
+    from vis.db.users import UserService
+    from vis.engine.sim import SimulatedCodeCamera
+    from vis.hmi.main_window import MainWindow
+
+    engine = make_engine(f"sqlite:///{tmp_path}/t.db")
+    init_db(engine)
+    sf = make_session_factory(engine)
+    users = UserService(sf)
+    users.seed_roles()
+    qa = users.create_user("qa", "Secret123", roles=("qa_manager",))
+    repo = RecipeRepository(sf)
+    r1 = repo.save_draft(build_code_demo_recipe(), user_id=qa)
+    repo.approve(r1, qa, "Secret123", "r")
+    r2 = repo.save_draft(build_ocr_demo_recipe(), user_id=qa)
+    repo.approve(r2, qa, "Secret123", "r")
+
+    def factory(cid, settings, recipe):
+        return SimulatedCodeCamera(cid, recipe, num_frames=2, defect_rate=0.0, seed=0)
+
+    win = MainWindow(
+        username="op", recipe=build_code_demo_recipe(), camera_factory=factory,
+        camera_ids=["cam1", "cam2"], session_factory=sf, user_id=qa,
+    )
+    win._recipe_combo.setCurrentIndex(win._recipe_combo.findData(r1))           # cam1 = code recipe
+    win._cam_recipe_combos["cam2"].setCurrentIndex(win._cam_recipe_combos["cam2"].findData(r2))  # cam2 = ocr
+    win.start()
+    if win._runner is not None:
+        win._runner.join()
+    win._refresh()
+    types1 = {t.tool_type for r in win._cam_recipes["cam1"].regions for t in r.tools}
+    types2 = {t.tool_type for r in win._cam_recipes["cam2"].regions for t in r.tools}
+    assert types1 != types2  # the two cameras run different recipes
+    win.stop()
+
+
 def test_main_window_yield_reasons_and_reject_review(qapp):
     pytest.importorskip("qrcode")
     from vis.cli import build_code_demo_recipe

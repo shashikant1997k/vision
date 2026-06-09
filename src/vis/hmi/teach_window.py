@@ -44,6 +44,15 @@ from .teach_model import (
 
 _FRIENDLY = {d["key"]: d["label"] for d in INSPECTION_TYPES}
 
+_PALETTE_ICONS = {
+    "code_verify": "▦",
+    "ocv_text": "≣",
+    "presence": "●",
+    "measure": "↔",
+    "color_check": "◑",
+    "template_match": "▣",
+}
+
 
 class TeachWindow(QMainWindow):
     """Teach a recipe by direct manipulation: pick an inspection, draw its box on
@@ -159,7 +168,7 @@ class TeachWindow(QMainWindow):
             palette_layout.addWidget(lbl)
 
         def _palette_btn(label, key, tip=""):
-            btn = QPushButton(label)
+            btn = QPushButton(f"{_PALETTE_ICONS.get(key, '•')}  {label}")
             btn.setStyleSheet("text-align:left; padding:5px 8px")
             if tip:
                 btn.setToolTip(tip)
@@ -176,11 +185,11 @@ class TeachWindow(QMainWindow):
                 _palette_btn(d["label"], d["key"])
 
         _section("Layout")
-        add_area = QPushButton("+ Add another product / area")
+        add_area = QPushButton("＋  Add another product / area")
         add_area.setStyleSheet("text-align:left; padding:5px 8px")
         add_area.clicked.connect(self._arm_region)
         palette_layout.addWidget(add_area)
-        self._locator_btn = QPushButton("Set part locator (follows the part)")
+        self._locator_btn = QPushButton("⌖  Set part locator (follows the part)")
         self._locator_btn.setStyleSheet("text-align:left; padding:5px 8px")
         self._locator_btn.setToolTip(
             "Draw a box around a distinctive, fixed feature (logo/edge/corner). "
@@ -235,11 +244,13 @@ class TeachWindow(QMainWindow):
         side = QVBoxLayout()
         side.addLayout(name_form)
         side.addWidget(palette)
-        side.addWidget(self._tree, 1)
+        self._tree.setMaximumHeight(170)  # keep the properties panel in view
+        side.addWidget(self._tree)
         side.addLayout(tree_buttons)
         side.addWidget(self._props_box)
         side.addLayout(actions)
         side.addWidget(self._status)
+        side.addStretch(1)
         side_widget = QWidget()
         side_widget.setLayout(side)
         # bound the panel width and let it scroll, so long read values can never

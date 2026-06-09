@@ -120,6 +120,15 @@ def test_main_window_per_camera_recipes(qapp, tmp_path):
         username="op", recipe=build_code_demo_recipe(), camera_factory=factory,
         camera_ids=["cam1", "cam2"], session_factory=sf, user_id=qa,
     )
+    # a station config can pre-select each camera's recipe at construction
+    win2 = MainWindow(
+        username="op", recipe=build_code_demo_recipe(), camera_factory=factory,
+        camera_ids=["cam1", "cam2"], camera_recipe_ids={"cam1": r1, "cam2": r2},
+        session_factory=sf, user_id=qa,
+    )
+    assert win2._recipe_combo.currentData() == r1
+    assert win2._cam_recipe_combos["cam2"].currentData() == r2
+
     win._recipe_combo.setCurrentIndex(win._recipe_combo.findData(r1))           # cam1 = code recipe
     win._cam_recipe_combos["cam2"].setCurrentIndex(win._cam_recipe_combos["cam2"].findData(r2))  # cam2 = ocr
     win.start()

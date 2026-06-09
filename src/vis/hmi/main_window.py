@@ -37,6 +37,7 @@ class MainWindow(QMainWindow):
         camera_factory,
         camera_id="cam1",
         camera_ids=None,
+        camera_recipe_ids=None,
         session_factory=None,
         user_id=None,
         report_dir="reports",
@@ -161,6 +162,12 @@ class MainWindow(QMainWindow):
             self._cam_recipe_combos[cid] = combo
             job_form.addRow(f"Recipe {cid}", combo)
         self._reload_recipes()  # populate the per-camera combos now they exist
+        for cid, rid in (camera_recipe_ids or {}).items():  # pre-select from station config
+            combo = self._cam_recipe_combos.get(cid)
+            if combo is not None:
+                idx = combo.findData(rid)
+                if idx >= 0:
+                    combo.setCurrentIndex(idx)
         job_form.addRow("Batch", self._batch_no)
 
         side = QVBoxLayout()

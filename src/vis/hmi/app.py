@@ -48,16 +48,45 @@ def main() -> int:
     if login.exec() != QDialog.Accepted:
         return 0
 
+    sf = make_session_factory(engine)
+    camera_ids, camera_recipe_ids = _select_station(sf)
+
     window = MainWindow(
         username=login.username,
         recipe=build_code_demo_recipe(),
         camera_factory=_sim_factory,
-        session_factory=make_session_factory(engine),
+        camera_ids=camera_ids,
+        camera_recipe_ids=camera_recipe_ids,
+        session_factory=sf,
         user_id=login.user_id,
     )
-    window.resize(1000, 560)
+    window.resize(1100, 580)
     window.show()
     return app.exec()
+
+
+def _select_station(session_factory):
+    """If stations are configured, let the operator pick one and return its
+    (camera_ids, {camera_id: recipe_id}); otherwise a single default camera."""
+    from PySide6.QtWidgets import QInputDialog
+
+    from ..db.stations import StationRepository
+
+    repo = StationRepository(session_factory)
+    stations = repo.list_stations()
+    if not stations:
+        return None, None
+    labels = [f"{name}{(' / ' + line) if line else ''}" for _sid, name, line in stations]
+    choice, ok = QInputDialog.getItem(None, "Select station", "Station:", labels, 0, False)
+    if not ok:
+        return None, None
+    sid = stations[labels.index(choice)][0]
+    cams = repo.camera_recipes(sid)
+    if not cams:
+        return None, None
+    camera_ids = [name for _cid, name, _rid in cams]
+    camera_recipe_ids = {name: rid for _cid, name, rid in cams if rid is not None}
+    return camera_ids, camera_recipe_ids
 
 
 if __name__ == "__main__":

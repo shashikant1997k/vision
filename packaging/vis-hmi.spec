@@ -29,6 +29,9 @@ except Exception:
 hiddenimports += [
     "vis.tools.code_verify",
     "vis.tools.ocr",
+    "vis.tools.ocv_font",
+    "vis.tools.general",
+    "vis.tools.readers",
     "vis.tools.stub_ocv",
 ]
 

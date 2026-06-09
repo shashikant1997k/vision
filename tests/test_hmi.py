@@ -68,6 +68,30 @@ def test_main_window_runs_and_counts(qapp):
     assert window._runner is None
 
 
+def test_main_window_multi_camera(qapp):
+    pytest.importorskip("qrcode")
+    from vis.cli import build_code_demo_recipe
+    from vis.engine.sim import SimulatedCodeCamera
+    from vis.hmi.main_window import MainWindow
+
+    def factory(camera_id, settings, recipe):
+        return SimulatedCodeCamera(camera_id, recipe, num_frames=3, defect_rate=0.0, seed=0)
+
+    window = MainWindow(
+        username="op", recipe=build_code_demo_recipe(), camera_factory=factory,
+        camera_ids=["cam1", "cam2", "cam3"],
+    )
+    assert window._cam_tabs.count() == 3                # one tab per camera
+    assert set(window._cam_images) == {"cam1", "cam2", "cam3"}
+    window.start()
+    if window._runner is not None:
+        window._runner.join()
+    window._refresh()
+    snap = window._stats.snapshot()
+    assert {"cam1", "cam2", "cam3"} <= set(snap)        # all cameras produced results
+    window.stop()
+
+
 def test_main_window_yield_reasons_and_reject_review(qapp):
     pytest.importorskip("qrcode")
     from vis.cli import build_code_demo_recipe

@@ -36,6 +36,7 @@ class MainWindow(QMainWindow):
         recipe,
         camera_factory,
         camera_id="cam1",
+        camera_ids=None,
         session_factory=None,
         user_id=None,
         report_dir="reports",
@@ -46,6 +47,7 @@ class MainWindow(QMainWindow):
         self._recipe = recipe
         self._camera_factory = camera_factory
         self._camera_id = camera_id
+        self._camera_ids = list(camera_ids) if camera_ids else [camera_id]
         self._sf = session_factory
         self._user_id = user_id
         self._report_dir = report_dir
@@ -69,10 +71,20 @@ class MainWindow(QMainWindow):
         self._close_batch.setEnabled(False)
         self._close_batch.clicked.connect(self.close_batch)
 
-        self._image = QLabel("No camera running")
-        self._image.setAlignment(Qt.AlignCenter)
-        self._image.setMinimumSize(640, 360)
-        self._image.setStyleSheet("background:#111; color:#888")
+        # one live view per camera (a single camera shows a single tab)
+        from PySide6.QtWidgets import QTabWidget
+
+        self._cam_tabs = QTabWidget()
+        self._cam_images: dict = {}
+        for cid in self._camera_ids:
+            lbl = QLabel("No camera running")
+            lbl.setAlignment(Qt.AlignCenter)
+            lbl.setMinimumSize(560, 340)
+            lbl.setStyleSheet("background:#111; color:#888")
+            self._cam_images[cid] = lbl
+            self._cam_tabs.addTab(lbl, cid)
+        self._cam_tabs.setTabBarAutoHide(True)  # hide the bar when there's one camera
+        self._image = self._cam_images[self._camera_ids[0]]  # primary (settings preview)
 
         from ..runtime import FailedImageLog
 
@@ -149,7 +161,7 @@ class MainWindow(QMainWindow):
         side_widget.setLayout(side)
 
         root = QHBoxLayout()
-        root.addWidget(self._image, 3)
+        root.addWidget(self._cam_tabs, 3)
         root.addWidget(side_widget, 1)
         central = QWidget()
         central.setLayout(root)
@@ -230,14 +242,16 @@ class MainWindow(QMainWindow):
                 bus.subscribe("inspection.result", ResultStore(self._sf, batch_id=self._batch_id).on_result)
                 self._close_batch.setEnabled(True)
 
-        source = self._camera_factory(self._camera_id, None, self._recipe)
+        assignments = [
+            (self._camera_factory(cid, None, self._recipe), self._recipe) for cid in self._camera_ids
+        ]
         lanes = sorted({region.reject_output for region in self._recipe.regions})
         reject = RejectController(
             [RejectOutputConfig(lane, channel=i + 1) for i, lane in enumerate(lanes)],
             io=SimulatedIO(),
         )
         self._runner = InspectionRunner(
-            [(source, self._recipe)],
+            assignments,
             SyncPool(),
             bus=bus,
             stats=self._stats,
@@ -436,14 +450,20 @@ class MainWindow(QMainWindow):
         self._settings_window.show()
 
     def _refresh(self) -> None:
-        latest = self._live.latest(self._camera_id)
-        if latest is not None:
-            frame, results = latest
-            annotated = draw_overlay(frame.image, self._recipe, results)
-            pixmap = numpy_to_qpixmap(annotated)
-            self._image.setPixmap(
-                pixmap.scaled(self._image.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            )
+        snap = self._stats.snapshot()
+        for cid, label in self._cam_images.items():
+            latest = self._live.latest(cid)
+            if latest is not None:
+                frame, results = latest
+                annotated = draw_overlay(frame.image, self._recipe, results)
+                pixmap = numpy_to_qpixmap(annotated)
+                label.setPixmap(
+                    pixmap.scaled(label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                )
+            cam = snap.get(cid, {})
+            if cam:  # per-camera pass/fail on the tab label
+                idx = list(self._cam_images).index(cid)
+                self._cam_tabs.setTabText(idx, f"{cid}  {cam.get('passed', 0)}✓/{cam.get('failed', 0)}✗")
         totals = self._stats.totals()
         self._total.setText(str(totals["total"]))
         self._pass.setText(str(totals["passed"]))

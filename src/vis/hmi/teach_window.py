@@ -400,8 +400,21 @@ class TeachWindow(QMainWindow):
             self._t_mode, self._t_value, self._t_field,
             self._t_rotation, self._t_minconf, self._t_reader, self._t_required,
         ]
+        # per-type editor for the general tools (presence/measure/colour/template)
+        self._general_form = QFormLayout()
+        self._general_form.setContentsMargins(0, 0, 0, 0)
+        self._general_container = QWidget()
+        self._general_container.setLayout(self._general_form)
+        self._gen_widgets: dict = {}
+
+        form_w = QWidget()
+        form_w.setLayout(form)
+        outer = QVBoxLayout()
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(form_w)
+        outer.addWidget(self._general_container)
         w = QWidget()
-        w.setLayout(form)
+        w.setLayout(outer)
         w.hide()
         return w
 
@@ -412,6 +425,102 @@ class TeachWindow(QMainWindow):
     def _sync_tool_inputs(self, mode: str) -> None:
         self._t_value.setEnabled(mode != BATCH_FIELD)
         self._t_field.setEnabled(mode == BATCH_FIELD)
+
+    # ---- general-tool editor (presence / measure / colour / template) -----
+    def _build_general_editor(self, tool) -> None:
+        while self._general_form.rowCount():
+            self._general_form.removeRow(0)
+        self._gen_widgets = {}
+        cfg = tool.config or {}
+        t = tool.tool_type
+
+        def spin(lo, hi, val, suffix=""):
+            s = QSpinBox()
+            s.setRange(lo, hi)
+            s.setValue(int(val))
+            if suffix:
+                s.setSuffix(suffix)
+            s.valueChanged.connect(self._general_edited)
+            return s
+
+        def combo(items, current):
+            c = QComboBox()
+            c.addItems(items)
+            c.setCurrentText(current)
+            c.currentTextChanged.connect(self._general_edited)
+            return c
+
+        if t == "presence":
+            self._gen_widgets["mode"] = combo(["present", "absent"], cfg.get("mode", "present"))
+            self._gen_widgets["min_coverage"] = spin(1, 100, int(cfg.get("min_coverage", 0.05) * 100), " %")
+            self._general_form.addRow("Object must be", self._gen_widgets["mode"])
+            self._general_form.addRow("Min coverage", self._gen_widgets["min_coverage"])
+        elif t == "measure":
+            self._gen_widgets["axis"] = combo(["width", "height"], cfg.get("axis", "width"))
+            self._gen_widgets["min_px"] = spin(0, 100000, int(cfg.get("min_px", 10)), " px")
+            self._gen_widgets["max_px"] = spin(0, 1000000, int(cfg.get("max_px", 10000)), " px")
+            self._general_form.addRow("Measure", self._gen_widgets["axis"])
+            self._general_form.addRow("Min size", self._gen_widgets["min_px"])
+            self._general_form.addRow("Max size", self._gen_widgets["max_px"])
+        elif t == "color_check":
+            target = cfg.get("target", [128, 128, 128])
+            swatch = QLabel()
+            swatch.setFixedSize(44, 18)
+            swatch.setStyleSheet(f"background: rgb({target[0]},{target[1]},{target[2]}); border:1px solid #888")
+            self._gen_widgets["swatch"] = swatch
+            pick = QPushButton("Set colour from box")
+            pick.clicked.connect(self._pick_color)
+            self._gen_widgets["tolerance"] = spin(0, 255, int(cfg.get("tolerance", 40)))
+            self._general_form.addRow("Target colour", swatch)
+            self._general_form.addRow("", pick)
+            self._general_form.addRow("Tolerance", self._gen_widgets["tolerance"])
+        elif t == "template_match":
+            self._gen_widgets["min_score"] = spin(0, 100, int(cfg.get("min_score", 0.6) * 100), " %")
+            recap = QPushButton("Recapture from box")
+            recap.clicked.connect(self._recapture_template)
+            self._general_form.addRow("Min match", self._gen_widgets["min_score"])
+            self._general_form.addRow("", recap)
+
+    def _general_edited(self) -> None:
+        if self._loading or self._selected is None or self._selected[0] != "tool":
+            return
+        tool = self._model.regions[self._selected[1]].tools[self._selected[2]]
+        gw = self._gen_widgets
+        t = tool.tool_type
+        if t == "presence":
+            tool.config = {"mode": gw["mode"].currentText(), "min_coverage": gw["min_coverage"].value() / 100}
+        elif t == "measure":
+            tool.config = {"axis": gw["axis"].currentText(), "min_px": gw["min_px"].value(), "max_px": gw["max_px"].value()}
+        elif t == "color_check":
+            tool.config = {**(tool.config or {}), "tolerance": gw["tolerance"].value()}
+        elif t == "template_match":
+            tool.config = {**(tool.config or {}), "min_score": gw["min_score"].value() / 100}
+        self._last_results = None
+
+    def _pick_color(self) -> None:
+        roi = self._selected_abs_roi()
+        if roi is None or self._selected[0] != "tool":
+            return
+        x, y, w, h = roi
+        crop = np.asarray(self._teach_image())[y : y + h, x : x + w, :3]
+        mean = crop.reshape(-1, 3).mean(axis=0).astype(int)
+        tool = self._model.regions[self._selected[1]].tools[self._selected[2]]
+        tool.config = {**(tool.config or {}), "target": [int(mean[0]), int(mean[1]), int(mean[2])]}
+        self._gen_widgets["swatch"].setStyleSheet(
+            f"background: rgb({mean[0]},{mean[1]},{mean[2]}); border:1px solid #888"
+        )
+        self._status.setText(f"Target colour set to rgb({mean[0]},{mean[1]},{mean[2]}) from the box.")
+
+    def _recapture_template(self) -> None:
+        roi = self._selected_abs_roi()
+        if roi is None or self._selected[0] != "tool":
+            return
+        from ..tools.general import register_template
+
+        x, y, w, h = roi
+        tool = self._model.regions[self._selected[1]].tools[self._selected[2]]
+        tool.config = {**(tool.config or {}), "template": register_template(self._teach_image()[y : y + h, x : x + w])}
+        self._status.setText("Golden template recaptured from the current box.")
 
     # ---- palette / drawing ------------------------------------------------
     def _arm_tool(self, type_key: str) -> None:
@@ -623,15 +732,18 @@ class TeachWindow(QMainWindow):
             self._t_type.setText(_FRIENDLY.get(tool.tool_type, tool.tool_type))
             if tool.tool_type not in MATCH_TOOLS:
                 # general tool (presence/measure/colour/template): hide the Read-only
-                # rows; show name + a plain-English settings summary
+                # rows and show a dedicated editor for this tool's settings
                 self._set_match_rows_visible(False)
-                self._tool_form.labelForField(self._t_lastread).setText("Settings")
-                self._t_lastread.setText(_describe_config(tool.tool_type, tool.config or {}))
+                self._tool_form.setRowVisible(self._t_lastread, False)
+                self._build_general_editor(tool)
+                self._general_container.show()
                 self._product_props.hide()
                 self._tool_props.show()
                 self._loading = False
                 return
+            self._general_container.hide()
             self._set_match_rows_visible(True)
+            self._tool_form.setRowVisible(self._t_lastread, True)
             self._tool_form.labelForField(self._t_lastread).setText("Last read")
             info = read_config(tool.tool_type, tool.config)
             self._t_mode.clear()
@@ -925,19 +1037,3 @@ def _disp(value) -> str:
     return str(value).replace("\x1d", "<GS>")
 
 
-def _describe_config(tool_type: str, config: dict) -> str:
-    """Plain-English summary of a general tool's settings."""
-    if tool_type == "presence":
-        pct = int(config.get("min_coverage", 0.05) * 100)
-        return f"{config.get('mode', 'present').title()} if ≥ {pct}% of the box is covered"
-    if tool_type == "measure":
-        return (
-            f"{config.get('axis', 'width').title()} must be "
-            f"{config.get('min_px', 0)}–{config.get('max_px', 0)} px"
-        )
-    if tool_type == "color_check":
-        t = config.get("target", [0, 0, 0])
-        return f"Colour ≈ rgb({t[0]},{t[1]},{t[2]}) ± {config.get('tolerance', 40)}"
-    if tool_type == "template_match":
-        return f"Must match the captured template ≥ {config.get('min_score', 0.6)}"
-    return str(config)

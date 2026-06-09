@@ -313,11 +313,18 @@ def test_teach_add_general_tools(tmp_path):
     tool = win._model.regions[0].tools[0]
     assert tool.tool_type == "presence" and tool.config.get("mode") == "present"
 
-    # editing the name must NOT wipe a general tool's config
+    # the per-type editor is shown; the Read-only match rows are hidden
     win._selected = ("tool", 0, 0)
     win._load_properties()
-    assert win._t_mode.isHidden()  # Read-only rows hidden for a general tool
-    assert "covered" in win._t_lastread.text()  # plain-English settings summary
+    assert win._t_mode.isHidden()
+    assert "min_coverage" in win._gen_widgets and "mode" in win._gen_widgets
+
+    # editing the editor updates the config
+    win._gen_widgets["min_coverage"].setValue(30)
+    win._general_edited()
+    assert win._model.regions[0].tools[0].config.get("min_coverage") == 0.30
+
+    # editing the name must NOT wipe a general tool's config
     win._t_name.setText("cap_present")
     win._tool_edited()
     assert win._model.regions[0].tools[0].config.get("mode") == "present"

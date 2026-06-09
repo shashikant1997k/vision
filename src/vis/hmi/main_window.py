@@ -502,11 +502,14 @@ class MainWindow(QMainWindow):
         state = {"gen": source.frames()}
 
         def provider():
-            frame = next(state["gen"], None)
-            if frame is None:
-                state["gen"] = self._camera_factory(self._camera_id, None, self._recipe).frames()
+            try:
                 frame = next(state["gen"], None)
-            return frame.image if frame is not None else None
+                if frame is None:
+                    state["gen"] = self._camera_factory(self._camera_id, None, self._recipe).frames()
+                    frame = next(state["gen"], None)
+                return frame.image if frame is not None else None
+            except Exception:
+                return None  # a bad preview must never block the settings screen
 
         self._settings_window = CameraSettingsWindow(
             image_provider=provider,

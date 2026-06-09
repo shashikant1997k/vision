@@ -35,3 +35,18 @@ def test_sim_all_defect_all_reject():
     _, results = _run(defect_rate=1.0, num_frames=3)
     assert results
     assert not any(r.passed for r in results)
+
+
+def test_sim_handles_roi_larger_than_frame():
+    """A recipe taught on a bigger image than the simulated frame must not crash
+    (regression: settings preview ValueError on out-of-bounds blit)."""
+    from vis.common.types import ROI
+    from vis.domain.entities import Recipe, Region, ToolSpec
+    from vis.engine.sim import SimulatedCodeCamera
+
+    # tool ROI deliberately runs off the right/bottom edge of the sim frame
+    region = Region("r", "P1", ROI(700, 400, 400, 400), "lane1",
+                    [ToolSpec("code1", "code_verify", ROI(0, 0, 300, 300), {"gs1": True, "expected_data": "X"})])
+    recipe = Recipe("r", "Demo", 1, [region])
+    frames = list(SimulatedCodeCamera("cam1", recipe, num_frames=2, defect_rate=0.0).frames())
+    assert len(frames) == 2 and frames[0].image.ndim == 3  # produced frames, no exception

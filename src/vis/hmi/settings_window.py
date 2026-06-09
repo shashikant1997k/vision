@@ -288,7 +288,10 @@ class CameraSettingsWindow(QMainWindow):
         )
 
     def _poll(self) -> None:
-        image = self._image_provider()
+        try:
+            image = self._image_provider()
+        except Exception:
+            return  # never let a preview error break the settings screen
         if image is None:
             return
         pixmap = numpy_to_qpixmap(image)

@@ -97,6 +97,17 @@ class SimulatedCodeCamera(Camera):
                     self._render_tool(img, region, tool, defective)
             yield Frame(self.camera_id, i, img, timestamp=float(i))
 
+    def _blit(self, img, y0, x0, patch) -> None:
+        """Write `patch` at (x0, y0), clipped to the image bounds — so a recipe
+        taught on a larger image than the simulated frame never crashes."""
+        h, w = img.shape[:2]
+        ph, pw = patch.shape[:2]
+        ay0, ax0 = max(0, y0), max(0, x0)
+        ay1, ax1 = min(h, y0 + ph), min(w, x0 + pw)
+        if ay1 <= ay0 or ax1 <= ax0:
+            return  # entirely off-frame
+        img[ay0:ay1, ax0:ax1] = patch[ay0 - y0 : ay1 - y0, ax0 - x0 : ax1 - x0]
+
     def _render_tool(self, img, region, tool, defective: bool) -> None:
         roi = tool.roi
         y0 = region.roi.y + roi.y
@@ -105,13 +116,14 @@ class SimulatedCodeCamera(Camera):
             data = str(tool.config.get("expected_data", ""))
             if defective:
                 data = data.replace("LOT42", "LOT99")  # simulate a misprint
-            img[y0 : y0 + roi.h, x0 : x0 + roi.w] = _render_qr(data, roi.w, roi.h)
+            self._blit(img, y0, x0, _render_qr(data, roi.w, roi.h))
         elif tool.tool_type == "ocv_text":
             text = str(tool.config.get("expected", ""))
             if defective and text:
                 text = text[:-1] + ("9" if text[-1] != "9" else "8")  # alter last char
-            img[y0 : y0 + roi.h, x0 : x0 + roi.w] = _render_text(text, roi.w, roi.h)
+            self._blit(img, y0, x0, _render_text(text, roi.w, roi.h))
         elif tool.tool_type == "ocv_stub":
             expected = int(tool.config.get("expected", 0))
             value = (expected + 1) % 256 if defective else expected
-            img[y0, x0, 0] = value
+            if 0 <= y0 < img.shape[0] and 0 <= x0 < img.shape[1]:
+                img[y0, x0, 0] = value

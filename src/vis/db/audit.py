@@ -46,6 +46,23 @@ class AuditService:
     def __init__(self, session) -> None:
         self.session = session
 
+    def list_entries(self, limit: int = 300) -> list[dict]:
+        """Recent audit entries (newest first) for the log viewer."""
+        from .models import User
+
+        rows = self.session.execute(
+            select(AuditEntry).order_by(AuditEntry.id.desc()).limit(limit)
+        ).scalars().all()
+        out = []
+        for e in rows:
+            user = self.session.get(User, e.user_id) if e.user_id else None
+            out.append({
+                "id": e.id, "ts": e.ts, "user": user.username if user else "—",
+                "action": e.action, "entity": f"{e.entity_type}#{e.entity_id}",
+                "signed": e.signature_id is not None,
+            })
+        return out
+
     def record(
         self,
         action: str,

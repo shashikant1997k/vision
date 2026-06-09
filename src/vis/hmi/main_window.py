@@ -114,6 +114,7 @@ class MainWindow(QMainWindow):
         self._review = QPushButton("Review rejects…")
         self._import = QPushButton("Import recipe…")
         self._stations = QPushButton("Stations…")
+        self._admin = QPushButton("Admin…")
         self._settings = QPushButton("Settings…")
         self._stop.setEnabled(False)
         self._start.clicked.connect(self.start)
@@ -124,6 +125,7 @@ class MainWindow(QMainWindow):
         self._review.clicked.connect(self.open_review)
         self._import.clicked.connect(self.import_recipe)
         self._stations.clicked.connect(self.open_stations)
+        self._admin.clicked.connect(self.open_admin)
         self._settings.clicked.connect(self.open_settings)
 
         counters = QGridLayout()
@@ -147,6 +149,7 @@ class MainWindow(QMainWindow):
         buttons.addWidget(self._review)
         buttons.addWidget(self._import)
         buttons.addWidget(self._stations)
+        buttons.addWidget(self._admin)
         buttons.addWidget(self._settings)
 
         recipe_row = QHBoxLayout()
@@ -384,6 +387,17 @@ class MainWindow(QMainWindow):
         self._stations_window = StationConfigWindow(self._sf, self._user_id, self)
         self._stations_window.resize(560, 480)
         self._stations_window.show()
+
+    def open_admin(self) -> None:
+        """Open the admin hub: users, products, batches & reports, audit log."""
+        if self._sf is None:
+            self.statusBar().showMessage("No database — admin unavailable.")
+            return
+        from .admin_window import AdminWindow
+
+        self._admin_window = AdminWindow(self._sf, self._user_id, report_dir=self._report_dir, parent=self)
+        self._admin_window.resize(820, 560)
+        self._admin_window.show()
 
     def open_review(self) -> None:
         """Open the reject-review filmstrip over the captured failed images."""

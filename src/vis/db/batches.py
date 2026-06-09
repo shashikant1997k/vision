@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from sqlalchemy import func, select
+
 from ..security.authz import Perm, require
 from .audit import AuditService
-from .models import Batch, ESignature, Recipe
+from .models import Batch, ESignature, InspectionResult, Product, Recipe
 from .users import AuthError, verify_user
 
 
@@ -18,6 +20,31 @@ class BatchService:
 
     def __init__(self, session_factory) -> None:
         self._sf = session_factory
+
+    def list_batches(self, limit: int = 200) -> list[dict]:
+        """Recent batches (newest first) with product + pass/fail counts."""
+        with self._sf() as s:
+            rows = s.execute(select(Batch).order_by(Batch.id.desc()).limit(limit)).scalars().all()
+            out = []
+            for b in rows:
+                product = s.get(Product, b.product_id) if b.product_id else None
+                total = s.execute(
+                    select(func.count()).select_from(InspectionResult).where(
+                        InspectionResult.batch_id == b.id
+                    )
+                ).scalar()
+                passed = s.execute(
+                    select(func.count()).select_from(InspectionResult).where(
+                        InspectionResult.batch_id == b.id, InspectionResult.passed.is_(True)
+                    )
+                ).scalar()
+                out.append({
+                    "id": b.id, "batch_no": b.batch_no,
+                    "product": product.name if product else "",
+                    "status": b.status, "started_at": b.started_at, "closed_at": b.closed_at,
+                    "total": total, "passed": passed, "failed": total - passed,
+                })
+            return out
 
     def start(
         self,

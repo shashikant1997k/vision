@@ -102,3 +102,45 @@ def test_station_config_requires_permission(tmp_path):
     repo = StationRepository(sf)
     with pytest.raises(PermissionError):
         repo.create_station("nope", user_id=op_id)  # operator lacks station.manage
+
+
+def test_station_camera_recipe_assignment(tmp_path):
+    from vis.cli import build_code_demo_recipe
+    from vis.db.store import RecipeRepository
+
+    sf, eng_id, _ = _setup(tmp_path)
+    qa = UserService(sf).create_user("qa", "Secret123", roles=("qa_manager",))
+    repo = StationRepository(sf)
+    rid = RecipeRepository(sf).save_draft(build_code_demo_recipe(), user_id=qa)
+    RecipeRepository(sf).approve(rid, qa, "Secret123", "released")
+
+    sid = repo.create_station("Line A", eng_id)
+    cam = repo.add_camera(sid, "cam1", eng_id, identifier="192.168.0.10")
+    assert (sid, "Line A", "") in repo.list_stations()
+    assert repo.camera_recipes(sid) == [(cam, "cam1", None)]
+
+    repo.set_camera_recipe(cam, rid, eng_id)
+    assert repo.camera_recipes(sid) == [(cam, "cam1", rid)]
+
+
+def test_station_window_assigns_recipe(tmp_path):
+    pytest.importorskip("PySide6")
+    from PySide6.QtWidgets import QApplication, QFormLayout
+
+    from vis.cli import build_code_demo_recipe
+    from vis.db.store import RecipeRepository
+    from vis.hmi.station_window import StationConfigWindow
+
+    sf, eng_id, _ = _setup(tmp_path)
+    qa = UserService(sf).create_user("qa", "Secret123", roles=("qa_manager",))
+    rid = RecipeRepository(sf).save_draft(build_code_demo_recipe(), user_id=qa)
+    RecipeRepository(sf).approve(rid, qa, "Secret123", "released")
+    repo = StationRepository(sf)
+    sid = repo.create_station("Line A", eng_id)
+    repo.add_camera(sid, "cam1", eng_id)
+
+    QApplication.instance() or QApplication([])
+    win = StationConfigWindow(sf, eng_id)
+    combo = win._cam_form.itemAt(0, QFormLayout.FieldRole).widget()
+    combo.setCurrentIndex(combo.findData(rid))  # triggers _assign -> persists
+    assert repo.camera_recipes(sid)[0][2] == rid

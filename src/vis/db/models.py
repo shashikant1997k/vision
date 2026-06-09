@@ -236,6 +236,7 @@ class CameraRow(Base):
     model: Mapped[str] = mapped_column(String(64), default="")
     interface: Mapped[str] = mapped_column(String(32), default="GigE Vision")
     settings: Mapped[dict] = mapped_column(JSONType, default=dict)  # CameraSettings.to_dict()
+    default_recipe_id: Mapped[int | None] = mapped_column(Integer)  # recipe this camera runs
 
 
 class RejectOutputRow(Base):

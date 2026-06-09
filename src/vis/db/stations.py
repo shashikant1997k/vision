@@ -175,6 +175,33 @@ class StationRepository:
             ).scalars().all()
             return [(r.id, r.name, CameraSettings.from_dict(r.settings)) for r in rows]
 
+    def list_stations(self) -> list[tuple[int, str, str]]:
+        with self._sf() as s:
+            rows = s.execute(select(Station).order_by(Station.id)).scalars().all()
+            return [(r.id, r.name, r.line) for r in rows]
+
+    def camera_recipes(self, station_id: int) -> list[tuple[int, str, int | None]]:
+        """(camera_id, name, default_recipe_id) for each camera in the station."""
+        with self._sf() as s:
+            rows = s.execute(
+                select(CameraRow).where(CameraRow.station_id == station_id).order_by(CameraRow.id)
+            ).scalars().all()
+            return [(r.id, r.name, r.default_recipe_id) for r in rows]
+
+    def set_camera_recipe(self, camera_id: int, recipe_id: int | None, user_id: int) -> None:
+        with self._sf() as s:
+            require(s, user_id, Perm.STATION_MANAGE)
+            camera = s.get(CameraRow, camera_id)
+            if camera is None:
+                raise ValueError(f"camera {camera_id} not found")
+            before = camera.default_recipe_id
+            camera.default_recipe_id = recipe_id
+            AuditService(s).record(
+                "camera.recipe", "camera", camera_id, user_id=user_id,
+                before={"recipe_id": before}, after={"recipe_id": recipe_id},
+            )
+            s.commit()
+
     def reject_output_configs(self, station_id: int) -> list[RejectOutputConfig]:
         """Build the RejectController config straight from persisted config."""
         with self._sf() as s:

@@ -112,6 +112,7 @@ class MainWindow(QMainWindow):
         self._emulate = QPushButton("Emulate folder…")
         self._review = QPushButton("Review rejects…")
         self._import = QPushButton("Import recipe…")
+        self._stations = QPushButton("Stations…")
         self._settings = QPushButton("Settings…")
         self._stop.setEnabled(False)
         self._start.clicked.connect(self.start)
@@ -121,6 +122,7 @@ class MainWindow(QMainWindow):
         self._emulate.clicked.connect(self.open_emulate)
         self._review.clicked.connect(self.open_review)
         self._import.clicked.connect(self.import_recipe)
+        self._stations.clicked.connect(self.open_stations)
         self._settings.clicked.connect(self.open_settings)
 
         counters = QGridLayout()
@@ -143,6 +145,7 @@ class MainWindow(QMainWindow):
         buttons.addWidget(self._emulate)
         buttons.addWidget(self._review)
         buttons.addWidget(self._import)
+        buttons.addWidget(self._stations)
         buttons.addWidget(self._settings)
 
         recipe_row = QHBoxLayout()
@@ -363,6 +366,17 @@ class MainWindow(QMainWindow):
             return
         self._reload_recipes()
         self.statusBar().showMessage(f"Imported recipe as draft #{new_id} — approve it to use on the line.")
+
+    def open_stations(self) -> None:
+        """Open the station/camera admin (define cameras + assign recipes)."""
+        if self._sf is None:
+            self.statusBar().showMessage("No database — station config unavailable.")
+            return
+        from .station_window import StationConfigWindow
+
+        self._stations_window = StationConfigWindow(self._sf, self._user_id, self)
+        self._stations_window.resize(560, 480)
+        self._stations_window.show()
 
     def open_review(self) -> None:
         """Open the reject-review filmstrip over the captured failed images."""

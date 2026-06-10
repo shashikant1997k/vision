@@ -131,3 +131,28 @@ def test_duplicate_open_batch_rejected(tmp_path):
         svc.start(rid, "B-DUP", qa)  # same number, still open
     svc.close(bid, qa, "Secret123", "released")
     assert svc.start(rid, "B-DUP", qa) > bid  # allowed again once closed
+
+
+def test_live_results_table_per_camera_lane(tmp_path):
+    _qapp()
+    sf, users = _setup(tmp_path)
+    op = users.create_user("op", "Secret123", roles=("operator",))
+    from vis.hmi.main_window import MainWindow
+
+    win = MainWindow(username="op", recipe=build_code_demo_recipe(),
+                     camera_factory=_factory(defect_rate=0.5, frames=6),
+                     camera_ids=["cam1", "cam2"], session_factory=sf, user_id=op,
+                     alarm_consecutive_rejects=0)  # alarm off for this test
+    win.start()
+    if win._runner is not None:
+        win._runner.join()
+    win._refresh()
+    table = win._results_table
+    assert table.rowCount() >= 2  # at least one lane row per camera
+    cams = {table.item(r, 0).text() for r in range(table.rowCount())}
+    assert cams == {"cam1", "cam2"}
+    for r in range(table.rowCount()):
+        total = int(table.item(r, 2).text())
+        assert total == int(table.item(r, 3).text()) + int(table.item(r, 4).text())
+        assert table.item(r, 5).text() in ("✓", "✗")  # live tick/cross present
+    win.stop()

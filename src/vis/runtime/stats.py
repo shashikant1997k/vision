@@ -20,6 +20,13 @@ class LiveStats:
             )
             cam.setdefault("rejects_by_reason", {})
             cam["total"] += 1
+            # per-lane running counts + the latest result (drives the live ✓/✗)
+            lane_name = region_result.reject_output or "?"
+            lanes = cam.setdefault("lanes", {})
+            lane = lanes.setdefault(lane_name, {"total": 0, "passed": 0, "failed": 0, "last": None})
+            lane["total"] += 1
+            lane["passed" if region_result.passed else "failed"] += 1
+            lane["last"] = bool(region_result.passed)
             if region_result.passed:
                 cam["passed"] += 1
                 cam["consecutive_failed"] = 0

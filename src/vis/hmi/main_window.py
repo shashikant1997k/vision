@@ -1,16 +1,18 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QFormLayout,
-    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QMainWindow,
     QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -109,13 +111,27 @@ class MainWindow(QMainWindow):
         self._fail = QLabel("0")
         self._yield = QLabel("—")
         for label in (self._total, self._pass, self._fail, self._yield):
-            label.setStyleSheet("font-size: 20px; font-weight: bold")
+            label.setStyleSheet("font-size: 15px; font-weight: bold")
         self._state = QLabel("● Idle")
         self._state.setStyleSheet("color:#888; font-weight:bold")
         self._reasons = QLabel("")
         self._reasons.setWordWrap(True)
         self._reasons.setMaximumWidth(360)
         self._reasons.setStyleSheet("color:#a33")
+
+        # real-time results table: one row per camera/lane with counts + a live
+        # ✓/✗ for the most recent product on that lane
+        self._results_table = QTableWidget(0, 6)
+        self._results_table.setHorizontalHeaderLabels(
+            ["Camera", "Lane", "Total", "Pass", "Fail", "Live"]
+        )
+        self._results_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self._results_table.setSelectionMode(QTableWidget.NoSelection)
+        self._results_table.verticalHeader().setVisible(False)
+        from PySide6.QtWidgets import QHeaderView
+
+        self._results_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self._results_table.setMinimumHeight(120)
 
         self._start = QPushButton("Start")
         self._stop = QPushButton("Stop")
@@ -154,17 +170,18 @@ class MainWindow(QMainWindow):
             widget.setVisible(self._can(perm))
         self._admin.setVisible(self._can(Perm.USER_MANAGE) or self._can(Perm.AUDIT_VIEW))
 
-        counters = QGridLayout()
-        counters.addWidget(self._state, 0, 0, 1, 2)
-        counters.addWidget(QLabel("Total"), 1, 0)
-        counters.addWidget(self._total, 1, 1)
-        counters.addWidget(QLabel("Pass"), 2, 0)
-        counters.addWidget(self._pass, 2, 1)
-        counters.addWidget(QLabel("Reject"), 3, 0)
-        counters.addWidget(self._fail, 3, 1)
-        counters.addWidget(QLabel("Yield"), 4, 0)
-        counters.addWidget(self._yield, 4, 1)
-        counters.addWidget(self._reasons, 5, 0, 1, 2)
+        # compact aggregate strip beneath the per-camera/lane table
+        totals_row = QHBoxLayout()
+        for caption, label in (
+            ("Total", self._total), ("Pass", self._pass),
+            ("Reject", self._fail), ("Yield", self._yield),
+        ):
+            cap = QLabel(caption)
+            cap.setStyleSheet("color:#667")
+            totals_row.addWidget(cap)
+            totals_row.addWidget(label)
+            totals_row.addSpacing(10)
+        totals_row.addStretch(1)
 
         buttons = QHBoxLayout()
         buttons.addWidget(self._start)
@@ -201,8 +218,10 @@ class MainWindow(QMainWindow):
 
         side = QVBoxLayout()
         side.addLayout(job_form)
-        side.addLayout(counters)
-        side.addStretch(1)
+        side.addWidget(self._state)
+        side.addWidget(self._results_table, 1)  # the live results board
+        side.addLayout(totals_row)
+        side.addWidget(self._reasons)
         side.addLayout(buttons)
         side.addWidget(self._close_batch)
         side_widget = QWidget()
@@ -567,6 +586,34 @@ class MainWindow(QMainWindow):
         self._settings_window.resize(900, 480)
         self._settings_window.show()
 
+    def _update_results_table(self, snap: dict) -> None:
+        """One row per camera/lane: counts plus a live ✓/✗ for the most recent
+        product on that lane."""
+        rows = []
+        for cid in sorted(snap):
+            for lane_name in sorted(snap[cid].get("lanes", {})):
+                lane = snap[cid]["lanes"][lane_name]
+                rows.append((cid, lane_name, lane["total"], lane["passed"], lane["failed"], lane["last"]))
+        self._results_table.setRowCount(len(rows))
+        live_font = QFont()
+        live_font.setPointSize(18)
+        live_font.setBold(True)
+        for r, (cid, lane_name, total, passed, failed, last) in enumerate(rows):
+            for c, value in enumerate((cid, lane_name, total, passed, failed)):
+                item = QTableWidgetItem(str(value))
+                item.setTextAlignment(Qt.AlignCenter)
+                if c == 3:
+                    item.setForeground(QColor(0, 140, 0))
+                elif c == 4:
+                    item.setForeground(QColor(200, 0, 0))
+                self._results_table.setItem(r, c, item)
+            live = QTableWidgetItem("—" if last is None else ("✓" if last else "✗"))
+            live.setTextAlignment(Qt.AlignCenter)
+            live.setFont(live_font)
+            if last is not None:
+                live.setForeground(QColor(0, 160, 0) if last else QColor(210, 0, 0))
+            self._results_table.setItem(r, 5, live)
+
     def _refresh(self) -> None:
         snap = self._stats.snapshot()
         for cid, label in self._cam_images.items():
@@ -583,6 +630,7 @@ class MainWindow(QMainWindow):
             if cam:  # per-camera pass/fail on the tab label
                 idx = list(self._cam_images).index(cid)
                 self._cam_tabs.setTabText(idx, f"{cid}  {cam.get('passed', 0)}✓/{cam.get('failed', 0)}✗")
+        self._update_results_table(snap)
         totals = self._stats.totals()
         self._total.setText(str(totals["total"]))
         self._pass.setText(str(totals["passed"]))

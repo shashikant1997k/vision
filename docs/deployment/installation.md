@@ -80,3 +80,28 @@ QT_QPA_PLATFORM=offscreen python -m pytest -q        # all tests should pass
   simulation/file sources. Everything else runs and is testable on macOS.
 - **Backups:** back up the PostgreSQL database and the image archive on the
   customer's schedule; verify restores.
+
+## Line-PC OCR accuracy & speed checklist
+
+The proven wiring for reliable on-line reading:
+
+1. **Hardware trigger** the GigE camera (Settings → Trigger → hardware/encoder)
+   so every product is captured at the same position — strobe the light from the
+   same signal to freeze motion.
+2. **Fixed ROI per field** drawn in the teach screen (tight box, but leave a few
+   pixels of margin — a box that clips a character reads partial text like
+   "XP 10" for "EXP. 10/2026").
+3. **Recognition-first reading is automatic**: a fixed single-line ROI goes
+   straight to the PP-OCR recogniser (no detector), which is faster and immune
+   to fragment reads; multi-line/loose boxes fall back to detect+recognise.
+4. **Acceleration**: on a line PC with an NVIDIA GPU,
+   `pip install onnxruntime-gpu` and set `VIS_OCR_CUDA=1` — det/cls/rec run on
+   the GPU. Note: rapidocr 1.2.x supports the **CUDA** execution provider only;
+   `onnxruntime-openvino` is NOT picked up by this version — for Intel-only
+   line PCs use the PP-OCRv4 models (CPU, default) or a licensed engine through
+   the reader seam (`vis.tools.readers`).
+5. **Models**: `python scripts/fetch_ocr_models.py` (PP-OCRv4; `--server` for the
+   most accurate recogniser).
+6. **Verification tolerance**: matching ignores spaces/punctuation and folds
+   confusable glyphs (O→0, I/L→1, S→5, Z→2) on BOTH sides — '"B.N0" read for
+   "B.No"' passes; a genuinely wrong digit still rejects.

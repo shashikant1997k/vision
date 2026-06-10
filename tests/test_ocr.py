@@ -78,3 +78,32 @@ def test_ocr_pipeline_reads_text_and_code():
     assert results and all(r.passed for r in results)
     lot_results = [tr for r in results for tr in r.tool_results if tr.tool_id.endswith("_lot")]
     assert lot_results and all(tr.measured_value == "LOT42" for tr in lot_results)
+
+
+def test_confusables_do_not_reject_real_print():
+    """The exact failure from the user's real blister: OCR read 'B.N0.TEST12345'
+    (zero) for printed 'B.No.TEST12345' — a 0/O lookalike must not reject."""
+    from vis.tools.ocr import _match_key
+    from vis.tools.readers import register_text_reader
+
+    assert _match_key("B.N0.TEST12345") == _match_key("B.No.TEST12345")
+    assert _match_key("EXP.1O/2O26") == _match_key("EXP.10/2026")   # O read for 0
+    assert _match_key("LOT5") == _match_key("L0TS")                  # S/5, O/0
+    assert _match_key("MFG.10/2025") != _match_key("MFG.10/2026")    # real diffs still fail
+
+    # deterministic end-to-end via the reader seam (no OCR engine involved)
+    register_text_reader("fake_blister", lambda img, cfg: ("B.N0.TEST12345", 0.93))
+    tool = build_tool(
+        "ocv_text", "bno",
+        {"reader": "fake_blister", "match": "exact", "expected": "B.No.TEST12345"},
+    )
+    import numpy as np
+
+    assert tool.inspect(np.zeros((20, 80, 3), dtype=np.uint8)).passed
+
+
+def test_single_line_recognition_first_still_reads():
+    # the rec-first strategy must read clean single-line crops (short-circuit path)
+    tool = build_tool("ocv_text", "lot", {"expected": "LOT42", "uppercase": True})
+    result = tool.inspect(_img("LOT42"))
+    assert result.passed and "LOT42" in result.measured_value.replace(" ", "")

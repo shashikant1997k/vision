@@ -66,6 +66,11 @@ def _engine():
             kwargs["rec_model_path"] = rec
         if cls:
             kwargs["cls_model_path"] = cls
+        # Line-PC acceleration: with onnxruntime-gpu installed, VIS_OCR_CUDA=1
+        # runs det/cls/rec on the GPU (rapidocr 1.2.x supports the CUDA EP only;
+        # OpenVINO needs a newer rapidocr or a licensed engine via the reader seam).
+        if os.environ.get("VIS_OCR_CUDA", "").lower() in ("1", "true", "yes"):
+            kwargs.update(det_use_cuda=True, cls_use_cuda=True, rec_use_cuda=True)
         try:
             _ENGINE = RapidOCR(**kwargs) if kwargs else RapidOCR()
         except Exception:  # pragma: no cover - bad override path
@@ -121,11 +126,18 @@ def _prepare(image):
         return arr
 
 
+# Visually-confusable characters folded for VERIFICATION (both sides get the
+# same folding, so it stays consistent): printed "B.No." read as "B.N0." must
+# not reject. Standard OCV practice for coded text (lot/exp/MRP).
+_CONFUSABLES = str.maketrans({"O": "0", "I": "1", "L": "1", "S": "5", "Z": "2"})
+
+
 def _match_key(s: str) -> str:
     """Comparison key: upper-case alphanumerics only (spaces + punctuation
-    ignored), so a '.'/',' OCR slip or a missing dot does not cause a false
-    reject. The raw read (with punctuation) is still shown to the operator."""
-    return "".join(ch for ch in (s or "").upper() if ch.isalnum())
+    ignored) with confusable characters folded (O→0, I/L→1, S→5, Z→2), so an
+    OCR slip on a lookalike glyph or a '.'/',' never causes a false reject.
+    The raw read is still shown to the operator."""
+    return "".join(ch for ch in (s or "").upper() if ch.isalnum()).translate(_CONFUSABLES)
 
 
 def _reading_order(result):
@@ -160,24 +172,52 @@ def _reading_order(result):
     return ordered
 
 
-def recognize(roi_image) -> tuple[str, float]:
-    """Return (text, mean_confidence) for a cropped ROI image. Pads the crop so
-    the detector has margin, reads pieces in reading order, and falls back to
-    whole-crop recognition (so a tight single-line box still reads)."""
-    engine = _engine()
-    image = _prepare(roi_image)
-    result, _ = engine(image)
+def _run_rec_only(engine, image) -> tuple[str, float]:
+    """Recognition directly on the whole crop (no detector) — the right primary
+    path for a fixed, operator-drawn single-line ROI: faster, and immune to the
+    detector fragmenting a tight crop into partial reads."""
+    try:
+        result, _ = engine(image, use_det=False, use_rec=True)
+    except Exception:
+        return "", 0.0
     if not result:
-        try:
-            result, _ = engine(image, use_det=False, use_rec=True)
-        except Exception:
-            result = None
+        return "", 0.0
+    texts = [item[1] for item in result]
+    scores = [float(item[2]) for item in result]
+    return " ".join(texts).strip(), (sum(scores) / len(scores))
+
+
+def _run_det_rec(engine, image) -> tuple[str, float]:
+    """Full detect + recognise (for multi-line / loose boxes), reading order."""
+    result, _ = engine(image)
     if not result:
         return "", 0.0
     items = _reading_order(result)
     texts = [item[1] for item in items]
     scores = [float(item[2]) for item in items]
     return " ".join(texts).strip(), (sum(scores) / len(scores))
+
+
+def _metric(text: str, score: float) -> float:
+    return len(text.replace(" ", "")) * max(score, 0.01)
+
+
+def recognize(roi_image) -> tuple[str, float]:
+    """Return (text, mean_confidence) for a cropped ROI.
+
+    Strategy: recognition-only on the whole crop FIRST (fixed single-line ROIs
+    are the industrial norm); a confident read short-circuits — faster than
+    det+rec. Otherwise also run detect+recognise and keep the better read
+    (handles multi-line or loose boxes)."""
+    engine = _engine()
+    image = _prepare(roi_image)
+    text1, score1 = _run_rec_only(engine, image)
+    if score1 >= 0.85 and len(text1.replace(" ", "")) >= 2:
+        return text1, score1
+    text2, score2 = _run_det_rec(engine, image)
+    if _metric(text2, score2) > _metric(text1, score1):
+        return text2, score2
+    return text1, score1
 
 
 def _normalize(text: str, config: dict) -> str:

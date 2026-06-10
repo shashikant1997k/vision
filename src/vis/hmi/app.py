@@ -72,6 +72,14 @@ def main() -> int:
 
     sf = make_session_factory(engine)
 
+    # seed the built-in OCV starter fonts (idempotent)
+    from ..db.fonts import FontRepository
+
+    try:
+        FontRepository(sf).ensure_builtins()
+    except Exception:
+        pass  # font seeding must never block startup
+
     # Part 11: an account still on the default seeded password must change it
     if login.password == "admin123":
         from .login import ChangePasswordDialog

@@ -30,6 +30,7 @@ from .roi_label import ImageRoiLabel
 from .teach_model import (
     BATCH_FIELD,
     BATCH_FIELDS,
+    FONT_KEYS,
     INSPECTION_TYPES,
     MATCH_TOOLS,
     ROTATIONS,
@@ -47,6 +48,7 @@ _FRIENDLY = {d["key"]: d["label"] for d in INSPECTION_TYPES}
 _PALETTE_ICONS = {
     "code_verify": "▦",
     "ocv_text": "≣",
+    "ocv_font": "▥",
     "presence": "●",
     "measure": "↔",
     "color_check": "◑",
@@ -391,6 +393,11 @@ class TeachWindow(QMainWindow):
         self._t_reader = QComboBox()
         self._t_reader.setToolTip("Reading engine — a licensed OCR/OCV library appears here once installed.")
         self._t_reader.currentTextChanged.connect(self._tool_edited)
+        self._t_font = QComboBox()
+        self._t_font.setToolTip(
+            "Trained OCV font (print technology + size). Train more in Fonts…"
+        )
+        self._t_font.currentIndexChanged.connect(self._font_changed)
         self._t_required = QCheckBox("Required (fails the product if this fails)")
         self._t_required.setChecked(True)
         self._t_required.setToolTip("Uncheck to make this inspection informational only.")
@@ -407,6 +414,7 @@ class TeachWindow(QMainWindow):
         form.addRow("Rotation", self._t_rotation)
         form.addRow("Min confidence", self._t_minconf)
         form.addRow("Engine", self._t_reader)
+        form.addRow("Font", self._t_font)
         form.addRow("", self._t_required)
         form.addRow("Last read", self._t_lastread)
         self._tool_form = form
@@ -572,7 +580,7 @@ class TeachWindow(QMainWindow):
             region = self._model.regions[region_index]
             rel = ROI(max(0, x - region.roi.x), max(0, y - region.roi.y), w, h)
             count = sum(len(r.tools) for r in self._model.regions) + 1
-            prefix = {"code_verify": "code", "ocv_text": "text"}.get(type_key, type_key)
+            prefix = {"code_verify": "code", "ocv_text": "text", "ocv_font": "ocv"}.get(type_key, type_key)
             tool_id = prefix + str(count)
             if type_key in MATCH_TOOLS:
                 config = tool_config(type_key, "")
@@ -772,7 +780,13 @@ class TeachWindow(QMainWindow):
             self._t_field.setCurrentIndex(field_index if field_index >= 0 else 0)
             self._t_required.setChecked(tool.config.get("required", True))
             self._t_minconf.setValue(int(round((tool.config.get("min_confidence", 0) or 0) * 100)))
-            self._load_engines(tool)
+            is_font_tool = tool.tool_type == "ocv_font"
+            self._tool_form.setRowVisible(self._t_font, is_font_tool)
+            self._tool_form.setRowVisible(self._t_reader, not is_font_tool)
+            if is_font_tool:
+                self._load_fonts(tool)
+            else:
+                self._load_engines(tool)
             self._t_lastread.setText(self._last_read_for(region.region_id, tool.tool_id))
             self._sync_tool_inputs(info["mode"])
             self._product_props.hide()
@@ -811,6 +825,54 @@ class TeachWindow(QMainWindow):
         idx = self._t_reader.findData(current)
         self._t_reader.setCurrentIndex(idx if idx >= 0 else 0)
 
+    def _load_fonts(self, tool) -> None:
+        """Populate the Font selector from the trained-font library."""
+        self._t_font.blockSignals(True)
+        self._t_font.clear()
+        self._fonts_index = {}
+        if self._sf is not None:
+            from ..db.fonts import FontRepository
+
+            for f in FontRepository(self._sf).list_fonts():
+                self._t_font.addItem(f"{f['name']}  ({f['samples']} samples)", f["id"])
+                self._fonts_index[f["id"]] = f
+        current = (tool.config or {}).get("font_id")
+        idx = self._t_font.findData(current)
+        if idx >= 0:
+            self._t_font.setCurrentIndex(idx)
+        elif self._t_font.count() and not (tool.config or {}).get("font"):
+            self._t_font.setCurrentIndex(0)
+            self._embed_font(tool, self._t_font.currentData())
+        self._t_font.blockSignals(False)
+
+    def _embed_font(self, tool, font_id) -> None:
+        """Embed the selected font's glyphs into the tool config (recipes stay
+        self-contained; retraining a font later doesn't silently change approved
+        recipes — re-teach to pick up new training)."""
+        if font_id is None or self._sf is None:
+            return
+        from ..db.fonts import FontRepository
+
+        try:
+            name, glyphs, dot_kernel = FontRepository(self._sf).glyphs(font_id)
+        except Exception:
+            return
+        config = dict(tool.config or {})
+        config.update({
+            "font": glyphs, "font_name": name, "font_id": font_id,
+            "dot_kernel": dot_kernel, "min_area": 6,
+        })
+        tool.config = config
+
+    def _font_changed(self) -> None:
+        if self._loading or self._selected is None or self._selected[0] != "tool":
+            return
+        tool = self._model.regions[self._selected[1]].tools[self._selected[2]]
+        if tool.tool_type != "ocv_font":
+            return
+        self._embed_font(tool, self._t_font.currentData())
+        self._last_results = None
+
     def _tool_edited(self) -> None:
         if self._loading or self._selected is None or self._selected[0] != "tool":
             return
@@ -839,6 +901,10 @@ class TeachWindow(QMainWindow):
         engine = self._t_reader.currentData()
         if engine and engine != "builtin":
             cfg["reader"] = engine
+        if tool.tool_type == "ocv_font":
+            for key in FONT_KEYS:  # the trained font must survive match edits
+                if key in (tool.config or {}):
+                    cfg[key] = tool.config[key]
         tool.config = cfg
         self._t_value.setPlaceholderText(value_hint(tool.tool_type, mode))
         self._sync_tool_inputs(mode)
@@ -977,6 +1043,8 @@ class TeachWindow(QMainWindow):
                     return f"Inspection '{tool.tool_id}' is Fixed value but its value is empty."
                 if cfg.get("match") == "regex" and not (cfg.get("pattern") or "").strip():
                     return f"Inspection '{tool.tool_id}' is Matches pattern but no pattern is set."
+                if tool.tool_type == "ocv_font" and not cfg.get("font"):
+                    return f"Inspection '{tool.tool_id}' needs a trained font (open Fonts… to train one)."
                 if cfg.get("expected_data") == "" and "pattern" not in cfg and cfg.get("gs1") and False:
                     pass  # code 'Any readable' is valid with empty value
         return None

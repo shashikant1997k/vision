@@ -144,6 +144,7 @@ class MainWindow(QMainWindow):
         self._emulate = QPushButton("Emulate folder…")
         self._review = QPushButton("Review rejects…")
         self._import = QPushButton("Import recipe…")
+        self._fonts = QPushButton("Fonts…")
         self._stations = QPushButton("Stations…")
         self._admin = QPushButton("Admin…")
         self._settings = QPushButton("Settings…")
@@ -155,6 +156,7 @@ class MainWindow(QMainWindow):
         self._emulate.clicked.connect(self.open_emulate)
         self._review.clicked.connect(self.open_review)
         self._import.clicked.connect(self.import_recipe)
+        self._fonts.clicked.connect(self.open_fonts)
         self._stations.clicked.connect(self.open_stations)
         self._admin.clicked.connect(self.open_admin)
         self._settings.clicked.connect(self.open_settings)
@@ -168,6 +170,7 @@ class MainWindow(QMainWindow):
             (self._teach_files, Perm.RECIPE_CREATE),
             (self._emulate, Perm.RECIPE_CREATE),
             (self._import, Perm.RECIPE_CREATE),
+            (self._fonts, Perm.RECIPE_CREATE),
             (self._stations, Perm.STATION_MANAGE),
             (self._settings, Perm.STATION_MANAGE),
         ):
@@ -196,7 +199,7 @@ class MainWindow(QMainWindow):
         run_row.addWidget(self._review, 2)
         buttons.addLayout(run_row)
         tools_row = QHBoxLayout()
-        for w in (self._teach, self._teach_files, self._emulate, self._import):
+        for w in (self._teach, self._teach_files, self._emulate, self._import, self._fonts):
             tools_row.addWidget(w, 1)
         buttons.addLayout(tools_row)
         admin_row = QHBoxLayout()
@@ -456,6 +459,17 @@ class MainWindow(QMainWindow):
             return
         self._reload_recipes()
         self.statusBar().showMessage(f"Imported recipe as draft #{new_id} — approve it to use on the line.")
+
+    def open_fonts(self) -> None:
+        """Open the OCV font-training library."""
+        if self._sf is None:
+            self.statusBar().showMessage("No database — font library unavailable.")
+            return
+        from .font_window import FontManagerWindow
+
+        self._fonts_window = FontManagerWindow(self._sf, self._user_id, self)
+        self._fonts_window.resize(640, 420)
+        self._fonts_window.show()
 
     def open_stations(self) -> None:
         """Open the station/camera admin (define cameras + assign recipes)."""

@@ -207,6 +207,21 @@ class AuditEntry(Base):
     entry_hash: Mapped[str] = mapped_column(String(64))
 
 
+class FontModelRow(Base):
+    """A trained OCV font: per-character glyph templates for one print
+    technology/size (docs/11-ocv-fonts.md). glyphs = {char: [b64 PNG, ...]}."""
+
+    __tablename__ = "font_models"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(96), unique=True)
+    print_type: Mapped[str] = mapped_column(String(24), default="cij")
+    dot_kernel: Mapped[int] = mapped_column(Integer, default=0)
+    builtin: Mapped[bool] = mapped_column(Boolean, default=False)
+    glyphs: Mapped[dict] = mapped_column(JSONType, default=dict)
+    created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[str] = mapped_column(String(40), default=_utcnow_iso)
+
+
 class ModelVersion(Base):
     __tablename__ = "model_versions"
     id: Mapped[int] = mapped_column(primary_key=True)

@@ -1,0 +1,99 @@
+{
+  "format": "vis-recipe/1",
+  "product": "testocrjob",
+  "recipe_id": "testocrjob",
+  "version": 1,
+  "image_rotation": 270,
+  "regions": [
+    {
+      "region_id": "region1",
+      "name": "Product 1",
+      "roi": {
+        "x": 0,
+        "y": 0,
+        "w": 4032,
+        "h": 2268
+      },
+      "reject_output": "lane1",
+      "pass_logic": "all",
+      "fixture": null,
+      "tools": [
+        {
+          "tool_id": "code1",
+          "tool_type": "code_verify",
+          "roi": {
+            "x": 671,
+            "y": 1339,
+            "w": 869,
+            "h": 928
+          },
+          "config": {
+            "gs1": true,
+            "required": false
+          }
+        },
+        {
+          "tool_id": "text2",
+          "tool_type": "ocv_text",
+          "roi": {
+            "x": 1499,
+            "y": 1469,
+            "w": 1111,
+            "h": 150
+          },
+          "config": {
+            "match": "exact",
+            "expected": "B.No.TEST12345",
+            "uppercase": true,
+            "required": false
+          }
+        },
+        {
+          "tool_id": "text3",
+          "tool_type": "ocv_text",
+          "roi": {
+            "x": 1510,
+            "y": 1718,
+            "w": 1001,
+            "h": 136
+          },
+          "config": {
+            "match": "exact",
+            "expected": "EXP.10/2026",
+            "uppercase": true
+          }
+        },
+        {
+          "tool_id": "measure4",
+          "tool_type": "measure",
+          "roi": {
+            "x": 2532,
+            "y": 2080,
+            "w": 74,
+            "h": 102
+          },
+          "config": {
+            "axis": "width",
+            "min_px": 10,
+            "max_px": 99997
+          }
+        },
+        {
+          "tool_id": "measure5",
+          "tool_type": "measure",
+          "roi": {
+            "x": 2106,
+            "y": 1988,
+            "w": 55,
+            "h": 81
+          },
+          "config": {
+            "axis": "width",
+            "min_px": 10,
+            "max_px": 100000
+          }
+        }
+      ]
+    }
+  ]
+}

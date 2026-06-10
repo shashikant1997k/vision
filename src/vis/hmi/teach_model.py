@@ -25,6 +25,12 @@ INSPECTION_TYPES = [
         "expected_label": "Expected text, e.g. LOT42",
         "category": "read",
     },
+    {
+        "key": "ocv_font",
+        "label": "Verify Text (OCV — trained font)",
+        "expected_label": "Expected text, e.g. LOT42",
+        "category": "read",
+    },
     {"key": "presence", "label": "Presence / Absence", "expected_label": "", "category": "inspect"},
     {"key": "measure", "label": "Measure (size)", "expected_label": "", "category": "inspect"},
     {"key": "color_check", "label": "Colour check", "expected_label": "", "category": "inspect"},
@@ -32,7 +38,10 @@ INSPECTION_TYPES = [
 ]
 
 # Tool types whose pass/fail is value/match based (the properties panel edits them).
-MATCH_TOOLS = ("code_verify", "ocv_text")
+MATCH_TOOLS = ("code_verify", "ocv_text", "ocv_font")
+
+# Config keys that carry a trained font — must survive match-mode edits.
+FONT_KEYS = ("font", "font_name", "font_id", "dot_kernel", "min_area")
 
 
 def default_config(tool_type: str) -> dict:

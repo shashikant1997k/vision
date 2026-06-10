@@ -36,15 +36,12 @@ def resolve_batch_fields(recipe: Recipe, batch_data: dict | None) -> Recipe:
             if config.get("match") == "batch_field":
                 value = str(data.get(config.get("field", ""), "") or "")
                 if value:
-                    resolved = {
-                        "match": "contains",
-                        "expected": value,
-                        "uppercase": config.get("uppercase", True),
-                    }
-                    if config.get("rotation"):
-                        resolved["rotation"] = config["rotation"]
-                    if config.get("required") is False:
-                        resolved["required"] = False
+                    # keep everything else (rotation, required, trained font, …)
+                    resolved = dict(config)
+                    resolved.pop("field", None)
+                    resolved["match"] = "contains"
+                    resolved["expected"] = value
+                    resolved.setdefault("uppercase", True)
                     config = resolved
                 # else: leave as batch_field → tool passes if any text is read
             tools.append(ToolSpec(tool.tool_id, tool.tool_type, tool.roi, config))

@@ -57,6 +57,9 @@ def main() -> int:
     from .main_window import MainWindow
 
     app = QApplication(sys.argv)
+    from .theme import apply_theme
+
+    apply_theme(app)
 
     engine = make_engine()
     init_db(engine)

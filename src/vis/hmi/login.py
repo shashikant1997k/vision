@@ -33,6 +33,7 @@ class LoginDialog(QDialog):
         form.addRow("Password", self._password)
 
         login_button = QPushButton("Log in")
+        login_button.setProperty("variant", "primary")
         login_button.clicked.connect(self._try_login)
         self._password.returnPressed.connect(self._try_login)
 
@@ -80,6 +81,7 @@ class ChangePasswordDialog(QDialog):
         form.addRow("New password", self._new)
         form.addRow("Confirm", self._confirm)
         button = QPushButton("Change password")
+        button.setProperty("variant", "primary")
         button.clicked.connect(self._change)
         self._confirm.returnPressed.connect(self._change)
 

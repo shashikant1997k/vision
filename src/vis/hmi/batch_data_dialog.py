@@ -25,6 +25,7 @@ class BatchDataDialog(QDialog):
             form.addRow(_LABELS.get(key, key), edit)
 
         start = QPushButton("Start batch")
+        start.setProperty("variant", "primary")
         start.clicked.connect(self.accept)
 
         layout = QVBoxLayout(self)

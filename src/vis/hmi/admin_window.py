@@ -65,11 +65,22 @@ class AdminWindow(QMainWindow):
         self._products = ProductRepository(session_factory)
         self._batches = BatchService(session_factory)
 
+        from ..security.authz import Perm, permissions_for
+
+        with session_factory() as s:
+            perms = permissions_for(s, user_id)
+
         tabs = QTabWidget()
-        tabs.addTab(self._users_tab(), "Users")
-        tabs.addTab(self._products_tab(), "Products")
-        tabs.addTab(self._batches_tab(), "Batches & reports")
-        tabs.addTab(self._audit_tab(), "Audit log")
+        self._users_table = self._products_table = None
+        self._batches_table = self._audit_table = None
+        if Perm.USER_MANAGE in perms:
+            tabs.addTab(self._users_tab(), "Users")
+        if Perm.RECIPE_CREATE in perms:
+            tabs.addTab(self._products_tab(), "Products")
+        if Perm.BATCH_MANAGE in perms:
+            tabs.addTab(self._batches_tab(), "Batches & reports")
+        if Perm.AUDIT_VIEW in perms:
+            tabs.addTab(self._audit_tab(), "Audit log")
         self._status = QLabel("")
         root = QVBoxLayout()
         root.addWidget(tabs, 1)
@@ -78,9 +89,12 @@ class AdminWindow(QMainWindow):
         central.setLayout(root)
         self.setCentralWidget(central)
 
-        self._refresh_users()
-        self._refresh_products()
-        self._refresh_batches()
+        if self._users_table is not None:
+            self._refresh_users()
+        if self._products_table is not None:
+            self._refresh_products()
+        if self._batches_table is not None:
+            self._refresh_batches()
         self._refresh_audit()
 
     @staticmethod
@@ -267,6 +281,8 @@ class AdminWindow(QMainWindow):
         return self._tab_widget(self._audit_table, [verify, refresh])
 
     def _refresh_audit(self):
+        if self._audit_table is None:
+            return  # this user has no audit.view tab
         with self._sf() as s:
             entries = AuditService(s).list_entries()
         rows = [

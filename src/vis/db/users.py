@@ -55,6 +55,18 @@ class UserService:
             s.commit()
             return user.id
 
+    def change_own_password(self, user_id: int, old_password: str, new_password: str) -> None:
+        """A user changes their OWN password (no admin permission needed, but the
+        current password must be re-entered). Audited."""
+        self.policy.validate(new_password)
+        with self._sf() as s:
+            user = s.get(User, user_id)
+            if user is None or not verify_password(old_password, user.password_hash):
+                raise AuthError("current password is incorrect")
+            user.password_hash = hash_password(new_password)
+            AuditService(s).record("user.password_change", "user", user_id, user_id=user_id)
+            s.commit()
+
     # --- management (RBAC user.manage + audited) ----------------------------
     def list_roles(self) -> list[str]:
         with self._sf() as s:

@@ -18,6 +18,25 @@ def _sim_factory(camera_id, settings, recipe):
     return SimulatedCodeCamera(camera_id, recipe, num_frames=60, defect_rate=0.25, seed=0)
 
 
+def _make_camera_factory():
+    """Pick the acquisition source: a real GigE camera when a GenTL producer is
+    configured (VIS_GENTL_CTI), else the simulator. Returns (factory, simulation)."""
+    import os
+
+    cti = os.environ.get("VIS_GENTL_CTI")
+    if cti:
+        def gige_factory(camera_id, settings, recipe):
+            from ..camera.genicam import HarvesterCamera
+
+            index = int(os.environ.get("VIS_CAMERA_INDEX", "0"))
+            camera = HarvesterCamera(camera_id, cti_path=cti, device_index=index, settings=settings)
+            camera.open()
+            return camera
+
+        return gige_factory, False
+    return _sim_factory, True
+
+
 def main() -> int:
     import os
     from pathlib import Path
@@ -49,16 +68,27 @@ def main() -> int:
         return 0
 
     sf = make_session_factory(engine)
+
+    # Part 11: an account still on the default seeded password must change it
+    if login.password == "admin123":
+        from .login import ChangePasswordDialog
+
+        change = ChangePasswordDialog(users, login.user_id, login.password)
+        if change.exec() != QDialog.Accepted:
+            return 0
+
+    camera_factory, simulation = _make_camera_factory()
     camera_ids, camera_recipe_ids = _select_station(sf)
 
     window = MainWindow(
         username=login.username,
         recipe=build_code_demo_recipe(),
-        camera_factory=_sim_factory,
+        camera_factory=camera_factory,
         camera_ids=camera_ids,
         camera_recipe_ids=camera_recipe_ids,
         session_factory=sf,
         user_id=login.user_id,
+        simulation=simulation,
     )
     window.resize(1100, 580)
     window.show()

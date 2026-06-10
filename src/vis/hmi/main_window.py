@@ -41,6 +41,8 @@ class MainWindow(QMainWindow):
         session_factory=None,
         user_id=None,
         report_dir="reports",
+        simulation=False,
+        alarm_consecutive_rejects=5,
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -53,6 +55,15 @@ class MainWindow(QMainWindow):
         self._sf = session_factory
         self._user_id = user_id
         self._report_dir = report_dir
+        self._simulation = simulation
+        self._alarm_threshold = alarm_consecutive_rejects
+        # the operator's permissions decide which controls are even shown
+        self._perms = None
+        if session_factory is not None and user_id is not None:
+            from ..security.authz import permissions_for
+
+            with session_factory() as s:
+                self._perms = permissions_for(s, user_id)
         self._teach_window = None
         self._settings_window = None
         self._runner: InspectionRunner | None = None
@@ -128,6 +139,21 @@ class MainWindow(QMainWindow):
         self._admin.clicked.connect(self.open_admin)
         self._settings.clicked.connect(self.open_settings)
 
+        # role-gate the engineering/admin controls: operators get a clean
+        # run-only screen (industry practice — not just backend permission errors)
+        from ..security.authz import Perm
+
+        for widget, perm in (
+            (self._teach, Perm.RECIPE_CREATE),
+            (self._teach_files, Perm.RECIPE_CREATE),
+            (self._emulate, Perm.RECIPE_CREATE),
+            (self._import, Perm.RECIPE_CREATE),
+            (self._stations, Perm.STATION_MANAGE),
+            (self._settings, Perm.STATION_MANAGE),
+        ):
+            widget.setVisible(self._can(perm))
+        self._admin.setVisible(self._can(Perm.USER_MANAGE) or self._can(Perm.AUDIT_VIEW))
+
         counters = QGridLayout()
         counters.addWidget(self._state, 0, 0, 1, 2)
         counters.addWidget(QLabel("Total"), 1, 0)
@@ -182,8 +208,21 @@ class MainWindow(QMainWindow):
         side_widget = QWidget()
         side_widget.setLayout(side)
 
+        # left side: an unmissable banner when running on a simulated source
+        left = QVBoxLayout()
+        if self._simulation:
+            banner = QLabel("⚠ SIMULATION MODE — simulated camera, not production data")
+            banner.setAlignment(Qt.AlignCenter)
+            banner.setStyleSheet(
+                "background:#b8860b; color:white; font-weight:bold; padding:6px"
+            )
+            left.addWidget(banner)
+        left.addWidget(self._cam_tabs, 1)
+        left_widget = QWidget()
+        left_widget.setLayout(left)
+
         root = QHBoxLayout()
-        root.addWidget(self._cam_tabs, 3)
+        root.addWidget(left_widget, 3)
         root.addWidget(side_widget, 1)
         central = QWidget()
         central.setLayout(root)
@@ -307,9 +346,19 @@ class MainWindow(QMainWindow):
         self._timer.start()
         self._start.setEnabled(False)
         self._stop.setEnabled(True)
-        self._set_state("Running", "#1a8")
-        batch = f" — batch {self._batch_no.text().strip()}" if self._batch_id else ""
-        self.statusBar().showMessage(f"Running{batch}")
+        if self._batch_id is not None:
+            self._set_state("Running", "#1a8")
+            self.statusBar().showMessage(f"Running — batch {batch_no}")
+        else:
+            # no batch = nothing is being recorded; make that unmistakable
+            self._set_state("Running (TEST — no batch)", "#b8860b")
+            self.statusBar().showMessage(
+                "Running WITHOUT a batch — results are not being recorded (test mode)"
+            )
+
+    def _can(self, perm: str) -> bool:
+        """True when the logged-in user holds `perm` (no DB/dev mode = allow)."""
+        return self._perms is None or perm in self._perms
 
     def _set_state(self, text: str, color: str) -> None:
         self._state.setText(f"● {text}")
@@ -546,6 +595,19 @@ class MainWindow(QMainWindow):
         else:
             self._reasons.setText("")
         self._review.setText(f"Review rejects… ({len(self._failed_log)})")
+
+        # GMP line-stop: N consecutive rejects means a systematic failure (e.g.
+        # the coder stopped printing) — stop the line and alarm, don't keep ejecting
+        if self._runner is not None and self._alarm_threshold:
+            streak = self._stats.consecutive_failures()
+            if streak >= self._alarm_threshold:
+                self.stop()
+                self._set_state(f"ALARM — {streak} consecutive rejects, line stopped", "#c22")
+                self.statusBar().showMessage(
+                    f"ALARM: {streak} consecutive rejects — line stopped. "
+                    "Check the printer/coder and product feed, then review rejects."
+                )
+                return
 
         # auto-stop when a bounded source (e.g. sim/file) has finished
         if self._runner is not None and not self._runner.is_running():

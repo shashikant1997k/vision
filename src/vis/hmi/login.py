@@ -49,4 +49,53 @@ class LoginDialog(QDialog):
             return
         self.user_id = uid
         self.username = self._username.text().strip()
+        self.password = self._password.text()  # for first-login forced change
+        self.accept()
+
+
+class ChangePasswordDialog(QDialog):
+    """Forces a password change (first login / default credentials). Won't close
+    until the change succeeds."""
+
+    def __init__(self, user_service: UserService, user_id: int, old_password: str, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Change password (required)")
+        self._users = user_service
+        self._uid = user_id
+        self._old = old_password
+
+        info = QLabel(
+            "This account is using a default password.\n"
+            "Set a new password before continuing (21 CFR Part 11)."
+        )
+        info.setWordWrap(True)
+        self._new = QLineEdit()
+        self._new.setEchoMode(QLineEdit.Password)
+        self._confirm = QLineEdit()
+        self._confirm.setEchoMode(QLineEdit.Password)
+        self._error = QLabel("")
+        self._error.setStyleSheet("color: #c00")
+
+        form = QFormLayout()
+        form.addRow("New password", self._new)
+        form.addRow("Confirm", self._confirm)
+        button = QPushButton("Change password")
+        button.clicked.connect(self._change)
+        self._confirm.returnPressed.connect(self._change)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(info)
+        layout.addLayout(form)
+        layout.addWidget(self._error)
+        layout.addWidget(button)
+
+    def _change(self) -> None:
+        if self._new.text() != self._confirm.text():
+            self._error.setText("Passwords do not match.")
+            return
+        try:
+            self._users.change_own_password(self._uid, self._old, self._new.text())
+        except Exception as exc:
+            self._error.setText(str(exc))
+            return
         self.accept()

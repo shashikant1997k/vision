@@ -22,7 +22,9 @@ class LiveStats:
             cam["total"] += 1
             if region_result.passed:
                 cam["passed"] += 1
+                cam["consecutive_failed"] = 0
             else:
+                cam["consecutive_failed"] = cam.get("consecutive_failed", 0) + 1
                 cam["failed"] += 1
                 lane = region_result.reject_output or "?"
                 cam["rejects_by_lane"][lane] = cam["rejects_by_lane"].get(lane, 0) + 1
@@ -45,6 +47,16 @@ class LiveStats:
                 out["failed"] += cam["failed"]
             out["yield"] = (100.0 * out["passed"] / out["total"]) if out["total"] else 0.0
             return out
+
+    def consecutive_failures(self) -> int:
+        """The worst current run of consecutive rejects across cameras — drives
+        the line-stop alarm (a failed coder rejects everything; the line must
+        stop, not keep ejecting)."""
+        with self._lock:
+            return max(
+                (cam.get("consecutive_failed", 0) for cam in self._per_camera.values()),
+                default=0,
+            )
 
     def reject_reasons(self) -> dict[str, int]:
         """Aggregated reject counts by failing inspection, across all cameras."""

@@ -64,6 +64,11 @@ class BatchService:
                 raise ValueError(f"recipe {recipe_id} not found")
             if recipe.status != "approved":
                 raise ValueError("recipe must be approved before a batch can start")
+            duplicate = s.execute(
+                select(Batch).where(Batch.batch_no == batch_no, Batch.status == "open")
+            ).scalars().first()
+            if duplicate is not None:
+                raise ValueError(f"batch {batch_no!r} is already open (close it first)")
 
             batch = Batch(
                 product_id=recipe.product_id,

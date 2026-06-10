@@ -109,13 +109,26 @@ def draw_layout(image: np.ndarray, recipe, highlight=None) -> np.ndarray:
     return np.array(img, dtype=np.uint8)
 
 
+def _banner(draw, xy, text, bg, font):
+    """Solid status banner (white text on the pass/fail colour) — readable from
+    across the line, never clipped."""
+    x, y = xy
+    left, top, right, bottom = draw.textbbox((x, y), text, font=font)
+    draw.rectangle([left - 6, top - 4, right + 6, bottom + 4], fill=bg)
+    draw.text((x, y), text, fill=(255, 255, 255), font=font)
+
+
 def draw_overlay(image: np.ndarray, recipe, results) -> np.ndarray:
-    """Return a copy of `image` annotated with region/tool boxes and results."""
+    """Return a copy of `image` annotated with results: each region boxed and
+    bannered green (PASS) / red (REJECT), each inspection boxed with a ✓/✗ tag
+    showing the value it read."""
     from PIL import Image, ImageDraw
 
     img = Image.fromarray(np.ascontiguousarray(image)).convert("RGB")
     draw = ImageDraw.Draw(img)
-    font = _font(16)
+    height = img.height
+    big = _font(max(18, height // 22))  # region status — readable at a glance
+    font = _font(max(14, height // 32))  # inspection value tags
 
     by_region = {r.region_id: r for r in results}
     for region in recipe.regions:
@@ -123,25 +136,41 @@ def draw_overlay(image: np.ndarray, recipe, results) -> np.ndarray:
         passed = region_result.passed if region_result else True
         color = GREEN if passed else RED
         rx, ry, rw, rh = region.roi.x, region.roi.y, region.roi.w, region.roi.h
-        draw.rectangle([rx, ry, rx + rw - 1, ry + rh - 1], outline=color, width=3)
+        draw.rectangle([rx, ry, rx + rw - 1, ry + rh - 1], outline=color, width=4)
 
         status = "PASS"
         if region_result and not region_result.passed:
-            status = f"REJECT {region_result.reject_output or ''}".strip()
-        _label(draw, (rx + 4, ry + 4), f"{region.name}: {status}", color, font)
+            status = f"REJECT -> {region_result.reject_output or '?'}"
+        # banner INSIDE the region's top edge so it can never clip off-image
+        banner_text = f"{region.name} — {status}"
+        banner_y = max(2, ry + 4)
+        _banner(draw, (rx + 8, banner_y), banner_text, color, big)
+        _, btop, _, bbottom = draw.textbbox((rx + 8, banner_y), banner_text, font=big)
+        banner_bottom = bbottom + 6
 
         tool_results = {t.tool_id: t for t in (region_result.tool_results if region_result else [])}
         for tool in region.tools:
             tr = tool_results.get(tool.tool_id)
             tcolor = GREEN if (tr and tr.passed) else RED
             ax, ay = rx + tool.roi.x, ry + tool.roi.y
-            draw.rectangle([ax, ay, ax + tool.roi.w - 1, ay + tool.roi.h - 1], outline=tcolor, width=2)
-            if tr is not None:
-                text = _disp(tr.measured_value)[:18]
-                grade = (tr.detail or {}).get("grade", {}).get("overall")
-                if grade:
-                    text = f"{text} [{grade}]"
-                ty = ay - 18 if ay >= 18 else ay + 2
-                _label(draw, (ax + 2, ty), text or "(no read)", tcolor, font)
+            draw.rectangle([ax, ay, ax + tool.roi.w - 1, ay + tool.roi.h - 1], outline=tcolor, width=3)
+            if tr is None:
+                continue
+            value = _disp(tr.measured_value) or "(no read)"
+            if len(value) > 28:
+                value = value[:27] + "…"
+            grade = (tr.detail or {}).get("grade", {}).get("overall")
+            if grade:
+                value = f"{value} [{grade}]"
+            mark = "OK" if tr.passed else "NG"
+            text = f"{mark}  {tool.tool_id}: {value}"
+            # place the tag above the box; flip inside at the image top, and keep
+            # it below the region's status banner so they never overlap
+            left, top, right, bottom = draw.textbbox((0, 0), text, font=font)
+            tag_h = bottom - top + 8
+            ty = ay - tag_h if ay - tag_h >= 0 else ay + 2
+            if ty < banner_bottom:
+                ty = banner_bottom + 2
+            _label(draw, (ax + 4, ty + 4), text, tcolor, font)
 
     return np.array(img, dtype=np.uint8)

@@ -159,15 +159,31 @@ class ImageRoiLabel(QLabel):
             painter.drawPixmap(int(ox + ix0 * scale), int(oy + iy0 * scale), sub)
         if self._selected is not None:
             corners, (rx, ry, rw, rh) = self._corners_display()
+            # dark halo under the selection so it reads on any background
+            halo = QPen(QColor(0, 0, 0))
+            halo.setWidth(4)
+            painter.setPen(halo)
+            painter.setBrush(Qt.NoBrush)
+            painter.drawRect(int(rx), int(ry), int(rw), int(rh))
             pen = QPen(QColor(255, 200, 0))
             pen.setWidth(2)
             painter.setPen(pen)
-            painter.setBrush(Qt.NoBrush)
             painter.drawRect(int(rx), int(ry), int(rw), int(rh))
+            painter.setPen(QPen(QColor(0, 0, 0)))
             painter.setBrush(QColor(255, 200, 0))
             for cx, cy in corners:
                 painter.drawRect(int(cx - HANDLE), int(cy - HANDLE), HANDLE * 2, HANDLE * 2)
         if self._start and self._cur:
+            halo = QPen(QColor(255, 255, 255))
+            halo.setWidth(4)
+            painter.setPen(halo)
+            painter.setBrush(Qt.NoBrush)
+            painter.drawRect(
+                QRect(
+                    int(self._start[0]), int(self._start[1]),
+                    int(self._cur[0] - self._start[0]), int(self._cur[1] - self._start[1]),
+                ).normalized()
+            )
             pen = QPen(QColor(40, 120, 255))
             pen.setWidth(2)
             painter.setPen(pen)

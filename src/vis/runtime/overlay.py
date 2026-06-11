@@ -63,6 +63,40 @@ CYAN = (0, 200, 220)
 SEARCH = (90, 130, 255)
 
 
+def _box_style(arr, box, color):
+    """Adapt a box's stroke to the LOCAL background so it is visible on any
+    colour: sample the luminance under the box, choose a contrasting halo
+    (black on light, white on dark) and brighten the accent on dark areas."""
+    x0, y0, x1, y1 = (int(v) for v in box)
+    h, w = arr.shape[:2]
+    x0c, x1c = max(0, min(w - 1, x0)), max(1, min(w, x1))
+    y0c, y1c = max(0, min(h - 1, y0)), max(1, min(h, y1))
+    patch = arr[y0c:y1c, x0c:x1c]
+    if patch.size == 0:
+        lum = 128.0
+    else:
+        lum = float(patch[..., :3].mean()) if patch.ndim == 3 else float(patch.mean())
+    halo = (0, 0, 0) if lum >= 110 else (255, 255, 255)
+    accent = color
+    if lum < 90:  # brighten the accent on dark backgrounds
+        accent = tuple(int(c + (255 - c) * 0.45) for c in color)
+    return halo, accent
+
+
+def _visible_rect(draw, arr, box, color, width=3):
+    """Rectangle with a contrasting halo — readable on every background."""
+    halo, accent = _box_style(arr, box, color)
+    x0, y0, x1, y1 = box
+    draw.rectangle([x0 - 1, y0 - 1, x1 + 1, y1 + 1], outline=halo, width=width + 2)
+    draw.rectangle([x0, y0, x1, y1], outline=accent, width=width)
+
+
+def _visible_dashed(draw, arr, box, color, width=2):
+    halo, accent = _box_style(arr, box, color)
+    _dashed_rect(draw, box, halo, width=width + 2)
+    _dashed_rect(draw, box, accent, width=width)
+
+
 def _margins(tool) -> tuple[int, int]:
     cfg = tool.config or {}
     legacy = int(cfg.get("search_margin", 0) or 0)
@@ -117,21 +151,22 @@ def draw_layout(image: np.ndarray, recipe, highlight=None) -> np.ndarray:
     img = Image.fromarray(np.ascontiguousarray(image)).convert("RGB")
     draw = ImageDraw.Draw(img)
     font = _font(16)
+    arr = np.ascontiguousarray(image)
     for region in recipe.regions:
         rx, ry, rw, rh = region.roi.x, region.roi.y, region.roi.w, region.roi.h
-        draw.rectangle([rx, ry, rx + rw - 1, ry + rh - 1], outline=BLUE, width=2)
+        _visible_rect(draw, arr, (rx, ry, rx + rw - 1, ry + rh - 1), BLUE, width=2)
         _label(draw, (rx + 4, ry + 4), region.name, BLUE, font)
         _draw_locator(draw, region, font)
         for tool in region.tools:
             ax, ay = rx + tool.roi.x, ry + tool.roi.y
             mx, my = _margins(tool)
             if mx or my:  # outer search window (print-drift tolerance) — dashed
-                _dashed_rect(
-                    draw,
+                _visible_dashed(
+                    draw, arr,
                     (ax - mx, ay - my, ax + tool.roi.w - 1 + mx, ay + tool.roi.h - 1 + my),
                     SEARCH,
                 )
-            draw.rectangle([ax, ay, ax + tool.roi.w - 1, ay + tool.roi.h - 1], outline=BLUE, width=2)
+            _visible_rect(draw, arr, (ax, ay, ax + tool.roi.w - 1, ay + tool.roi.h - 1), BLUE, width=3)
             ty = ay - 18 if ay >= 18 else ay + 2
             friendly = _FRIENDLY.get(tool.tool_type, tool.tool_type)
             _label(draw, (ax + 2, ty), f"{tool.tool_id} · {friendly}", BLUE, font)
@@ -156,7 +191,8 @@ def draw_overlay(image: np.ndarray, recipe, results) -> np.ndarray:
     showing the value it read."""
     from PIL import Image, ImageDraw
 
-    img = Image.fromarray(np.ascontiguousarray(image)).convert("RGB")
+    arr = np.ascontiguousarray(image)
+    img = Image.fromarray(arr).convert("RGB")
     draw = ImageDraw.Draw(img)
     height = img.height
     big = _font(max(18, height // 22))  # region status — readable at a glance
@@ -168,7 +204,7 @@ def draw_overlay(image: np.ndarray, recipe, results) -> np.ndarray:
         passed = region_result.passed if region_result else True
         color = GREEN if passed else RED
         rx, ry, rw, rh = region.roi.x, region.roi.y, region.roi.w, region.roi.h
-        draw.rectangle([rx, ry, rx + rw - 1, ry + rh - 1], outline=color, width=4)
+        _visible_rect(draw, arr, (rx, ry, rx + rw - 1, ry + rh - 1), color, width=4)
 
         status = "PASS"
         if region_result and not region_result.passed:
@@ -187,12 +223,12 @@ def draw_overlay(image: np.ndarray, recipe, results) -> np.ndarray:
             ax, ay = rx + tool.roi.x, ry + tool.roi.y
             mx, my = _margins(tool)
             if mx or my:
-                _dashed_rect(
-                    draw,
+                _visible_dashed(
+                    draw, arr,
                     (ax - mx, ay - my, ax + tool.roi.w - 1 + mx, ay + tool.roi.h - 1 + my),
-                    tcolor, width=1,
+                    tcolor, width=2,
                 )
-            draw.rectangle([ax, ay, ax + tool.roi.w - 1, ay + tool.roi.h - 1], outline=tcolor, width=3)
+            _visible_rect(draw, arr, (ax, ay, ax + tool.roi.w - 1, ay + tool.roi.h - 1), tcolor, width=3)
             if tr is None:
                 continue
             value = _disp(tr.measured_value) or "(no read)"

@@ -42,10 +42,13 @@ class InspectionPipeline:
             region_img = crop(image, roi)
             for tool in region.tools:
                 tool_roi = tool.roi
+                task_config = tool.config
                 margin = int((tool.config or {}).get("search_margin", 0) or 0)
                 if margin:
                     # two-region model: crop the OUTER search window; the tool
-                    # locates the text inside it (tolerates print drift)
+                    # locates the text inside it (tolerates print drift). The
+                    # INNER box position is passed along so the locator anchors
+                    # on the taught spot, not the (margin-dependent) window centre.
                     from ..common.types import ROI as _ROI
 
                     rh, rw = region_img.shape[:2]
@@ -53,6 +56,10 @@ class InspectionPipeline:
                     y0 = max(0, tool_roi.y - margin)
                     x1 = min(rw, tool_roi.x + tool_roi.w + margin)
                     y1 = min(rh, tool_roi.y + tool_roi.h + margin)
+                    task_config = dict(tool.config or {})
+                    task_config["_inner_roi"] = [
+                        tool_roi.x - x0, tool_roi.y - y0, tool_roi.w, tool_roi.h
+                    ]
                     tool_roi = _ROI(x0, y0, max(1, x1 - x0), max(1, y1 - y0))
                 roi_img = crop(region_img, tool_roi)
                 tasks.append(
@@ -62,7 +69,7 @@ class InspectionPipeline:
                         region_id=region.region_id,
                         tool_id=tool.tool_id,
                         tool_type=tool.tool_type,
-                        config=tool.config,
+                        config=task_config,
                         roi_image=roi_img.copy(),  # contiguous copy for pickling
                     )
                 )

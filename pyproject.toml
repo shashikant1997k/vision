@@ -23,6 +23,7 @@ vis-demo = "vis.cli:main"
 vis-hmi = "vis.hmi.app:main"
 vis-emulate = "vis.runtime.emulate:main"
 vis-backup = "vis.db.backup:main"
+vis-ocrbench = "vis.runtime.ocr_bench:main"
 
 [build-system]
 requires = ["setuptools>=68"]

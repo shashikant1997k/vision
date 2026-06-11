@@ -93,3 +93,23 @@ def test_teach_defaults_and_splitter(tmp_path):
     assert win._t_search.value() == 20
     win._t_search.setValue(45)  # operator widens the drift tolerance
     assert win._model.regions[0].tools[0].config.get("search_margin") == 45
+
+
+def test_read_is_stable_across_search_margins():
+    """The user's report: changing Search ± changed the read. With the locator
+    anchored on the taught inner box, the same line must read identically for
+    any reasonable margin — even with neighbour lines inside the window."""
+    canvas = np.full((300, 420, 3), 235, np.uint8)
+    canvas[40:90, 100:300] = _render_text("AAA111", 200, 50)    # neighbour above
+    canvas[120:170, 100:300] = _render_text("LOT42", 200, 50)   # target line
+    canvas[200:250, 100:300] = _render_text("BBB222", 200, 50)  # neighbour below
+
+    reads = {}
+    for margin in (8, 16, 30, 50):
+        config = {"expected": "LOT42", "uppercase": True, "search_margin": margin}
+        tool = ToolSpec("lot", "ocv_text", ROI(100, 120, 200, 50), config)
+        recipe = Recipe("r", "P", 1, [Region("r1", "P1", ROI(0, 0, 420, 300), "lane1", [tool])])
+        result = _run(recipe, canvas)[0]
+        reads[margin] = result.tool_results[0].measured_value.replace(" ", "")
+    assert len(set(reads.values())) == 1, reads   # identical read at every margin
+    assert reads[8] == "LOT42"

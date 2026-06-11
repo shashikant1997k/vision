@@ -9,14 +9,18 @@ def rotate_image(image, degrees) -> np.ndarray:
     return np.rot90(image, k) if k else np.asarray(image)
 
 
-def locate_text_band(image, pad: int = 6) -> np.ndarray:
-    """Find the text line nearest the centre of a SEARCH window and return a
-    tight crop of it (the two-region model: an outer search region tolerates
-    print drift; the read happens on the located inner band).
+def locate_text_band(image, pad: int = 6, prefer=None) -> np.ndarray:
+    """Find the text line inside a SEARCH window and return a crop of it (the
+    two-region model: an outer search region tolerates print drift; the read
+    happens on the located band).
 
-    Engine-free: foreground = minority class (Otsu), pick the horizontal band of
-    foreground rows whose centre is closest to the window centre, then trim the
-    column extent. Falls back to the full window when nothing is found."""
+    `prefer` is the taught INNER box (x, y, w, h) within the window: the band
+    with the most row-overlap with it wins (stable as the window grows), falling
+    back to the band nearest the inner-box centre, then to the inner crop itself
+    — so changing the search margin does not change which line is read.
+
+    Engine-free: foreground = minority class (Otsu); bands are contiguous runs
+    of active rows. Full width (only neighbouring LINES corrupt a read)."""
     arr = np.asarray(image)
     gray = arr[..., :3].mean(axis=2) if arr.ndim == 3 else arr.astype(np.float32)
     try:
@@ -33,9 +37,17 @@ def locate_text_band(image, pad: int = 6) -> np.ndarray:
         if (binary == 255).mean() > 0.5:
             binary = 255 - binary
 
+    def _inner_crop():
+        if prefer is None:
+            return arr
+        px, py, pw, ph = (int(v) for v in prefer)
+        py0 = max(0, py)
+        py1 = min(arr.shape[0], py + max(1, ph))
+        return arr[py0:py1] if py1 > py0 else arr
+
     rows = (binary > 0).sum(axis=1).astype(np.float32)
     if rows.max() <= 0:
-        return arr
+        return _inner_crop()
     active = rows > 0.15 * rows.max()
     # contiguous active bands
     bands = []
@@ -49,9 +61,24 @@ def locate_text_band(image, pad: int = 6) -> np.ndarray:
     if start is not None:
         bands.append((start, len(active)))
     if not bands:
-        return arr
-    centre = arr.shape[0] / 2
-    y0, y1 = min(bands, key=lambda b: abs((b[0] + b[1]) / 2 - centre))
+        return _inner_crop()
+
+    if prefer is not None:
+        py = int(prefer[1])
+        py1 = py + max(1, int(prefer[3]))
+        anchor_centre = (py + py1) / 2
+
+        def overlap(band):
+            return max(0, min(band[1], py1) - max(band[0], py))
+
+        best = max(bands, key=overlap)
+        if overlap(best) > 0:
+            y0, y1 = best
+        else:  # nothing overlaps the taught spot — nearest band to it
+            y0, y1 = min(bands, key=lambda b: abs((b[0] + b[1]) / 2 - anchor_centre))
+    else:
+        centre = arr.shape[0] / 2
+        y0, y1 = min(bands, key=lambda b: abs((b[0] + b[1]) / 2 - centre))
     y0 = max(0, y0 - pad)
     y1 = min(arr.shape[0], y1 + pad)
     # full width: only the LINE needs isolating (neighbouring lines above/below

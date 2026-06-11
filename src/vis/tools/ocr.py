@@ -254,6 +254,11 @@ class OcrTextTool(InspectionTool):
         reader = get_text_reader(self.config.get("reader"))
         rotation = self.config.get("rotation", 0)
         roi = rotate_image(roi_image, rotation)
+        if int(self.config.get("search_margin", 0) or 0) > 0:
+            # outer search window -> locate the text line nearest its centre
+            from .transform import locate_text_band
+
+            roi = locate_text_band(roi)
         text, score = reader(roi, self.config)
         # Only search orientations when the straight read is WEAK (empty / a few
         # chars / low confidence) — otherwise we'd risk "improving" a good read

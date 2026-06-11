@@ -41,7 +41,20 @@ class InspectionPipeline:
                     roi = ROI(roi.x + dx, roi.y + dy, roi.w, roi.h)  # follow the part
             region_img = crop(image, roi)
             for tool in region.tools:
-                roi_img = crop(region_img, tool.roi)
+                tool_roi = tool.roi
+                margin = int((tool.config or {}).get("search_margin", 0) or 0)
+                if margin:
+                    # two-region model: crop the OUTER search window; the tool
+                    # locates the text inside it (tolerates print drift)
+                    from ..common.types import ROI as _ROI
+
+                    rh, rw = region_img.shape[:2]
+                    x0 = max(0, tool_roi.x - margin)
+                    y0 = max(0, tool_roi.y - margin)
+                    x1 = min(rw, tool_roi.x + tool_roi.w + margin)
+                    y1 = min(rh, tool_roi.y + tool_roi.h + margin)
+                    tool_roi = _ROI(x0, y0, max(1, x1 - x0), max(1, y1 - y0))
+                roi_img = crop(region_img, tool_roi)
                 tasks.append(
                     ToolTask(
                         frame_id=frame.frame_id,

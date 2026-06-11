@@ -211,6 +211,10 @@ class FontOcvTool(InspectionTool):
 
     def inspect(self, roi_image) -> ToolResult:
         cfg = self.config
+        if int(cfg.get("search_margin", 0) or 0) > 0:
+            from .transform import locate_text_band
+
+            roi_image = locate_text_band(roi_image)
         # for verification we know the expected value -> know the character count,
         # which lets us split the ROI reliably (monospace coder fonts)
         expected_str = cfg.get("expected") or ""

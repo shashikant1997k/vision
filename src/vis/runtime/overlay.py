@@ -99,6 +99,12 @@ def draw_layout(image: np.ndarray, recipe, highlight=None) -> np.ndarray:
         _draw_locator(draw, region, font)
         for tool in region.tools:
             ax, ay = rx + tool.roi.x, ry + tool.roi.y
+            margin = int((tool.config or {}).get("search_margin", 0) or 0)
+            if margin:  # outer search window (print-drift tolerance)
+                draw.rectangle(
+                    [ax - margin, ay - margin, ax + tool.roi.w - 1 + margin, ay + tool.roi.h - 1 + margin],
+                    outline=(150, 170, 230), width=1,
+                )
             draw.rectangle([ax, ay, ax + tool.roi.w - 1, ay + tool.roi.h - 1], outline=BLUE, width=1)
             ty = ay - 18 if ay >= 18 else ay + 2
             friendly = _FRIENDLY.get(tool.tool_type, tool.tool_type)
@@ -153,6 +159,12 @@ def draw_overlay(image: np.ndarray, recipe, results) -> np.ndarray:
             tr = tool_results.get(tool.tool_id)
             tcolor = GREEN if (tr and tr.passed) else RED
             ax, ay = rx + tool.roi.x, ry + tool.roi.y
+            margin = int((tool.config or {}).get("search_margin", 0) or 0)
+            if margin:
+                draw.rectangle(
+                    [ax - margin, ay - margin, ax + tool.roi.w - 1 + margin, ay + tool.roi.h - 1 + margin],
+                    outline=tcolor, width=1,
+                )
             draw.rectangle([ax, ay, ax + tool.roi.w - 1, ay + tool.roi.h - 1], outline=tcolor, width=3)
             if tr is None:
                 continue

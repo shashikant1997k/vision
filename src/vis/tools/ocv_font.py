@@ -211,7 +211,8 @@ class FontOcvTool(InspectionTool):
 
     def inspect(self, roi_image) -> ToolResult:
         cfg = self.config
-        if int(cfg.get("search_margin", 0) or 0) > 0:
+        _legacy = int(cfg.get("search_margin", 0) or 0)
+        if int(cfg.get("search_x", _legacy) or 0) > 0 or int(cfg.get("search_y", _legacy) or 0) > 0:
             from .transform import locate_text_band
 
             roi_image = locate_text_band(roi_image, prefer=cfg.get("_inner_roi"))

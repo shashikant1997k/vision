@@ -391,14 +391,22 @@ class TeachWindow(QMainWindow):
             self._t_rotation.addItem(f"{deg}°", deg)
         self._t_rotation.setToolTip("Rotate the box before reading (for sideways print).")
         self._t_rotation.currentTextChanged.connect(self._tool_edited)
-        self._t_search = QSpinBox()
-        self._t_search.setRange(0, 200)
-        self._t_search.setSuffix(" px")
-        self._t_search.setToolTip(
-            "Outer SEARCH region: how far around the drawn box the text may drift "
-            "(left/right/up/down). The tool locates the line inside it, then reads."
+        self._t_search_x = QSpinBox()
+        self._t_search_x.setRange(0, 300)
+        self._t_search_x.setSuffix(" px")
+        self._t_search_x.setToolTip(
+            "Outer SEARCH region, horizontal: how far LEFT/RIGHT the print may "
+            "drift from the drawn box. The tool locates the line inside, then reads."
         )
-        self._t_search.valueChanged.connect(self._tool_edited)
+        self._t_search_x.valueChanged.connect(self._tool_edited)
+        self._t_search_y = QSpinBox()
+        self._t_search_y.setRange(0, 300)
+        self._t_search_y.setSuffix(" px")
+        self._t_search_y.setToolTip(
+            "Outer SEARCH region, vertical: how far UP/DOWN the print may drift "
+            "from the drawn box."
+        )
+        self._t_search_y.valueChanged.connect(self._tool_edited)
         self._t_minconf = QSpinBox()
         self._t_minconf.setRange(0, 100)
         self._t_minconf.setSuffix(" %")
@@ -426,7 +434,8 @@ class TeachWindow(QMainWindow):
         form.addRow("Value", self._t_value)
         form.addRow("Batch field", self._t_field)
         form.addRow("Rotation", self._t_rotation)
-        form.addRow("Search ±", self._t_search)
+        form.addRow("Search ↔ L/R", self._t_search_x)
+        form.addRow("Search ↕ T/B", self._t_search_y)
         form.addRow("Min confidence", self._t_minconf)
         form.addRow("Engine", self._t_reader)
         form.addRow("Font", self._t_font)
@@ -436,7 +445,7 @@ class TeachWindow(QMainWindow):
         # rows that only apply to Read (code/text) inspections
         self._match_rows = [
             self._t_mode, self._t_value, self._t_field,
-            self._t_rotation, self._t_search, self._t_minconf, self._t_reader, self._t_required,
+            self._t_rotation, self._t_search_x, self._t_search_y, self._t_minconf, self._t_reader, self._t_required,
         ]
         # per-type editor for the general tools (presence/measure/colour/template)
         self._general_form = QFormLayout()
@@ -602,7 +611,8 @@ class TeachWindow(QMainWindow):
             else:
                 config = default_config(type_key)
             if type_key in ("code_verify", "ocv_text", "ocv_font"):
-                config["search_margin"] = 20  # outer search region (print drift)
+                config["search_x"] = 20  # outer search region (print drift)
+                config["search_y"] = 20
             if type_key == "template_match":  # capture the golden patch from the ROI
                 from ..tools.general import register_template
 
@@ -797,7 +807,9 @@ class TeachWindow(QMainWindow):
             self._t_field.setCurrentIndex(field_index if field_index >= 0 else 0)
             self._t_required.setChecked(tool.config.get("required", True))
             self._t_minconf.setValue(int(round((tool.config.get("min_confidence", 0) or 0) * 100)))
-            self._t_search.setValue(int(tool.config.get("search_margin", 0) or 0))
+            _legacy = int(tool.config.get("search_margin", 0) or 0)
+            self._t_search_x.setValue(int(tool.config.get("search_x", _legacy) or 0))
+            self._t_search_y.setValue(int(tool.config.get("search_y", _legacy) or 0))
             is_font_tool = tool.tool_type == "ocv_font"
             self._tool_form.setRowVisible(self._t_font, is_font_tool)
             self._tool_form.setRowVisible(self._t_reader, not is_font_tool)
@@ -916,8 +928,10 @@ class TeachWindow(QMainWindow):
             cfg["required"] = False
         if self._t_minconf.value() > 0:
             cfg["min_confidence"] = self._t_minconf.value() / 100
-        if self._t_search.value() > 0:
-            cfg["search_margin"] = self._t_search.value()
+        if self._t_search_x.value() > 0:
+            cfg["search_x"] = self._t_search_x.value()
+        if self._t_search_y.value() > 0:
+            cfg["search_y"] = self._t_search_y.value()
         engine = self._t_reader.currentData()
         if engine and engine != "builtin":
             cfg["reader"] = engine

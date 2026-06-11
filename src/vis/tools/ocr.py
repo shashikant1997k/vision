@@ -254,7 +254,8 @@ class OcrTextTool(InspectionTool):
         reader = get_text_reader(self.config.get("reader"))
         rotation = self.config.get("rotation", 0)
         roi = rotate_image(roi_image, rotation)
-        if int(self.config.get("search_margin", 0) or 0) > 0:
+        _legacy = int(self.config.get("search_margin", 0) or 0)
+        if int(self.config.get("search_x", _legacy) or 0) > 0 or int(self.config.get("search_y", _legacy) or 0) > 0:
             # outer search window -> locate the line anchored on the taught
             # inner box (stable regardless of margin size)
             from .transform import locate_text_band

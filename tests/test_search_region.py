@@ -86,13 +86,16 @@ def test_teach_defaults_and_splitter(tmp_path):
     win._arm_tool("ocv_text")
     win._on_roi_drawn(20, 20, 120, 40)
     tool = win._model.regions[0].tools[0]
-    assert tool.config.get("search_margin") == 20  # outer search region by default
+    assert tool.config.get("search_x") == 20  # outer search region by default
+    assert tool.config.get("search_y") == 20
 
     win._selected = ("tool", 0, 0)
     win._load_properties()
-    assert win._t_search.value() == 20
-    win._t_search.setValue(45)  # operator widens the drift tolerance
-    assert win._model.regions[0].tools[0].config.get("search_margin") == 45
+    assert win._t_search_x.value() == 20 and win._t_search_y.value() == 20
+    win._t_search_x.setValue(60)  # wide horizontal drift, tight vertical
+    win._t_search_y.setValue(10)
+    cfg = win._model.regions[0].tools[0].config
+    assert cfg.get("search_x") == 60 and cfg.get("search_y") == 10
 
 
 def test_read_is_stable_across_search_margins():
@@ -113,3 +116,17 @@ def test_read_is_stable_across_search_margins():
         reads[margin] = result.tool_results[0].measured_value.replace(" ", "")
     assert len(set(reads.values())) == 1, reads   # identical read at every margin
     assert reads[8] == "LOT42"
+
+
+def test_asymmetric_search_directions():
+    """Different drift tolerance per direction: wide horizontally, tight
+    vertically — horizontal drift reads; the window stays clear of neighbours."""
+    canvas = np.full((300, 460, 3), 235, np.uint8)
+    canvas[60:110, 100:300] = _render_text("AAA111", 200, 50)   # neighbour above
+    canvas[120:170, 130:330] = _render_text("LOT42", 200, 50)   # target, drifted +30 px right
+    config = {"expected": "LOT42", "uppercase": True, "search_x": 50, "search_y": 4}
+    tool = ToolSpec("lot", "ocv_text", ROI(100, 120, 200, 50), config)
+    recipe = Recipe("r", "P", 1, [Region("r1", "P1", ROI(0, 0, 460, 300), "lane1", [tool])])
+    result = _run(recipe, canvas)[0]
+    assert result.passed, result.tool_results[0].measured_value
+    assert result.tool_results[0].measured_value.replace(" ", "") == "LOT42"

@@ -60,6 +60,31 @@ _FRIENDLY = {
 }
 YELLOW = (255, 200, 0)
 CYAN = (0, 200, 220)
+SEARCH = (90, 130, 255)
+
+
+def _margins(tool) -> tuple[int, int]:
+    cfg = tool.config or {}
+    legacy = int(cfg.get("search_margin", 0) or 0)
+    return int(cfg.get("search_x", legacy) or 0), int(cfg.get("search_y", legacy) or 0)
+
+
+def _dashed_rect(draw, box, color, width=2, dash=7, gap=5):
+    """Dashed rectangle — the standard look for a SEARCH region, visually
+    distinct from the solid inner read box."""
+    x0, y0, x1, y1 = box
+    x = x0
+    while x < x1:
+        end = min(x + dash, x1)
+        draw.line([(x, y0), (end, y0)], fill=color, width=width)
+        draw.line([(x, y1), (end, y1)], fill=color, width=width)
+        x += dash + gap
+    y = y0
+    while y < y1:
+        end = min(y + dash, y1)
+        draw.line([(x0, y), (x0, end)], fill=color, width=width)
+        draw.line([(x1, y), (x1, end)], fill=color, width=width)
+        y += dash + gap
 
 
 def _template_size(fixture):
@@ -99,13 +124,14 @@ def draw_layout(image: np.ndarray, recipe, highlight=None) -> np.ndarray:
         _draw_locator(draw, region, font)
         for tool in region.tools:
             ax, ay = rx + tool.roi.x, ry + tool.roi.y
-            margin = int((tool.config or {}).get("search_margin", 0) or 0)
-            if margin:  # outer search window (print-drift tolerance)
-                draw.rectangle(
-                    [ax - margin, ay - margin, ax + tool.roi.w - 1 + margin, ay + tool.roi.h - 1 + margin],
-                    outline=(150, 170, 230), width=1,
+            mx, my = _margins(tool)
+            if mx or my:  # outer search window (print-drift tolerance) — dashed
+                _dashed_rect(
+                    draw,
+                    (ax - mx, ay - my, ax + tool.roi.w - 1 + mx, ay + tool.roi.h - 1 + my),
+                    SEARCH,
                 )
-            draw.rectangle([ax, ay, ax + tool.roi.w - 1, ay + tool.roi.h - 1], outline=BLUE, width=1)
+            draw.rectangle([ax, ay, ax + tool.roi.w - 1, ay + tool.roi.h - 1], outline=BLUE, width=2)
             ty = ay - 18 if ay >= 18 else ay + 2
             friendly = _FRIENDLY.get(tool.tool_type, tool.tool_type)
             _label(draw, (ax + 2, ty), f"{tool.tool_id} · {friendly}", BLUE, font)
@@ -159,11 +185,12 @@ def draw_overlay(image: np.ndarray, recipe, results) -> np.ndarray:
             tr = tool_results.get(tool.tool_id)
             tcolor = GREEN if (tr and tr.passed) else RED
             ax, ay = rx + tool.roi.x, ry + tool.roi.y
-            margin = int((tool.config or {}).get("search_margin", 0) or 0)
-            if margin:
-                draw.rectangle(
-                    [ax - margin, ay - margin, ax + tool.roi.w - 1 + margin, ay + tool.roi.h - 1 + margin],
-                    outline=tcolor, width=1,
+            mx, my = _margins(tool)
+            if mx or my:
+                _dashed_rect(
+                    draw,
+                    (ax - mx, ay - my, ax + tool.roi.w - 1 + mx, ay + tool.roi.h - 1 + my),
+                    tcolor, width=1,
                 )
             draw.rectangle([ax, ay, ax + tool.roi.w - 1, ay + tool.roi.h - 1], outline=tcolor, width=3)
             if tr is None:

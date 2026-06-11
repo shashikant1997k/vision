@@ -43,8 +43,11 @@ class InspectionPipeline:
             for tool in region.tools:
                 tool_roi = tool.roi
                 task_config = tool.config
-                margin = int((tool.config or {}).get("search_margin", 0) or 0)
-                if margin:
+                cfg = tool.config or {}
+                legacy = int(cfg.get("search_margin", 0) or 0)
+                margin_x = int(cfg.get("search_x", legacy) or 0)
+                margin_y = int(cfg.get("search_y", legacy) or 0)
+                if margin_x or margin_y:
                     # two-region model: crop the OUTER search window; the tool
                     # locates the text inside it (tolerates print drift). The
                     # INNER box position is passed along so the locator anchors
@@ -52,10 +55,10 @@ class InspectionPipeline:
                     from ..common.types import ROI as _ROI
 
                     rh, rw = region_img.shape[:2]
-                    x0 = max(0, tool_roi.x - margin)
-                    y0 = max(0, tool_roi.y - margin)
-                    x1 = min(rw, tool_roi.x + tool_roi.w + margin)
-                    y1 = min(rh, tool_roi.y + tool_roi.h + margin)
+                    x0 = max(0, tool_roi.x - margin_x)
+                    y0 = max(0, tool_roi.y - margin_y)
+                    x1 = min(rw, tool_roi.x + tool_roi.w + margin_x)
+                    y1 = min(rh, tool_roi.y + tool_roi.h + margin_y)
                     task_config = dict(tool.config or {})
                     task_config["_inner_roi"] = [
                         tool_roi.x - x0, tool_roi.y - y0, tool_roi.w, tool_roi.h

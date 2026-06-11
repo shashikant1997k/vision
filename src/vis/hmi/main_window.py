@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (
     QComboBox,
@@ -30,6 +30,9 @@ class MainWindow(QMainWindow):
     Acquisition/inspection run in the InspectionRunner's background threads; the
     UI polls LiveView/LiveStats on a timer (it never blocks on the pipeline).
     """
+
+    remoteStart = Signal()  # emitted from protocol-server threads -> GUI thread
+    remoteStop = Signal()
 
     def __init__(
         self,
@@ -145,6 +148,8 @@ class MainWindow(QMainWindow):
         self._review = QPushButton("Review rejects…")
         self._import = QPushButton("Import recipe…")
         self._fonts = QPushButton("Fonts…")
+        self._events_btn = QPushButton("Events…")
+        self._comms = QPushButton("Comms…")
         self._stations = QPushButton("Stations…")
         self._admin = QPushButton("Admin…")
         self._settings = QPushButton("Settings…")
@@ -157,6 +162,8 @@ class MainWindow(QMainWindow):
         self._review.clicked.connect(self.open_review)
         self._import.clicked.connect(self.import_recipe)
         self._fonts.clicked.connect(self.open_fonts)
+        self._events_btn.clicked.connect(self.open_events)
+        self._comms.clicked.connect(self.open_comms)
         self._stations.clicked.connect(self.open_stations)
         self._admin.clicked.connect(self.open_admin)
         self._settings.clicked.connect(self.open_settings)
@@ -171,6 +178,7 @@ class MainWindow(QMainWindow):
             (self._emulate, Perm.RECIPE_CREATE),
             (self._import, Perm.RECIPE_CREATE),
             (self._fonts, Perm.RECIPE_CREATE),
+            (self._comms, Perm.STATION_MANAGE),
             (self._stations, Perm.STATION_MANAGE),
             (self._settings, Perm.STATION_MANAGE),
         ):
@@ -196,14 +204,15 @@ class MainWindow(QMainWindow):
         run_row = QHBoxLayout()
         run_row.addWidget(self._start, 1)
         run_row.addWidget(self._stop, 1)
-        run_row.addWidget(self._review, 2)
+        run_row.addWidget(self._review, 1)
+        run_row.addWidget(self._events_btn, 1)
         buttons.addLayout(run_row)
         tools_row = QHBoxLayout()
         for w in (self._teach, self._teach_files, self._emulate, self._import, self._fonts):
             tools_row.addWidget(w, 1)
         buttons.addLayout(tools_row)
         admin_row = QHBoxLayout()
-        for w in (self._stations, self._admin, self._settings):
+        for w in (self._comms, self._stations, self._admin, self._settings):
             admin_row.addWidget(w, 1)
         buttons.addLayout(admin_row)
 
@@ -267,6 +276,23 @@ class MainWindow(QMainWindow):
         self._timer = QTimer(self)
         self._timer.setInterval(100)
         self._timer.timeout.connect(self._refresh)
+
+        # third-party integration (docs/12): TCP server + 24V line signals
+        self._events = None
+        self._proto = None
+        self._signals = None
+        self.remoteStart.connect(self.start)
+        self.remoteStop.connect(self.stop)
+        if self._sf is not None:
+            from ..db.app_settings import EventService
+
+            self._events = EventService(self._sf)
+            from .comms_window import load_comms_config
+
+            try:
+                self._apply_comms(load_comms_config(self._sf))
+            except Exception:
+                pass  # comms must never block the HMI from opening
 
     def _reload_recipes(self) -> None:
         """Repopulate every camera's recipe selector from the DB (demo + approved)."""
@@ -344,12 +370,17 @@ class MainWindow(QMainWindow):
                     return
                 bus.subscribe("inspection.result", ResultStore(self._sf, batch_id=self._batch_id).on_result)
                 self._close_batch.setEnabled(True)
+                self._log_event("info", "batch", f"Batch {batch_no} started")
 
         # build one assignment per camera, each with its own selected recipe
         # (the primary recipe drives the batch; batch values apply to all cameras)
         from ..runtime.resolve import resolve_batch_fields
 
         self._cam_recipes = {}
+        if self._proto is not None:
+            bus.subscribe("inspection.result", self._proto.on_result)
+        if self._signals is not None:
+            bus.subscribe("inspection.result", self._signals.on_result)
         assignments = []
         for cid in self._camera_ids:
             if cid == self._camera_ids[0]:
@@ -380,6 +411,11 @@ class MainWindow(QMainWindow):
         self._timer.start()
         self._start.setEnabled(False)
         self._stop.setEnabled(True)
+        if self._signals is not None:
+            self._signals.set_running(True)
+        if self._proto is not None:
+            self._proto.push_state(True, batch_no or None)
+        self._log_event("info", "run", f"Inspection started ({'batch ' + batch_no if self._batch_id else 'test mode'})")
         if self._batch_id is not None:
             self._set_state("Running", "#1a8")
             self.statusBar().showMessage(f"Running — batch {batch_no}")
@@ -389,6 +425,106 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(
                 "Running WITHOUT a batch — results are not being recorded (test mode)"
             )
+
+    # ---- third-party integration (TCP + 24V) -----------------------------
+    def _log_event(self, severity: str, source: str, message: str) -> None:
+        if self._events is not None:
+            try:
+                self._events.log(severity, source, message, batch_id=self._batch_id)
+            except Exception:
+                pass
+
+    def _apply_comms(self, config: dict) -> None:
+        """(Re)start the integration server + line signals from saved config."""
+        if self._proto is not None:
+            self._proto.stop()
+            self._proto = None
+        if self._signals is not None:
+            self._signals.close()
+            self._signals = None
+
+        signal_map = None
+        if config and any((config.get("signals") or {}).get(k) for k in
+                          ("ready", "running", "pass_pulse", "reject_pulse", "alarm", "heartbeat")):
+            from ..io.signals import LineSignals, SignalMap
+
+            io = None
+            if config.get("io_backend") == "modbus" and config.get("io_host"):
+                from ..io import ModbusTcpIO
+
+                io = ModbusTcpIO(config["io_host"], int(config.get("io_port", 502)))
+            signal_map = SignalMap.from_dict(config.get("signals"))
+            self._signals = LineSignals(io, signal_map)
+            self._signals.set_ready(True)
+            self._signals.start_heartbeat()
+
+        if config and config.get("tcp_enabled"):
+            from ..integrations.vis_protocol import VisProtocolServer
+
+            callbacks = {
+                "get_status": self._proto_status,
+                "get_counters": self._proto_counters,
+                "list_recipes": self._proto_recipes,
+            }
+            if config.get("allow_remote_start"):
+                callbacks["start"] = self.remoteStart.emit  # thread-safe -> GUI
+                callbacks["stop"] = self.remoteStop.emit
+            self._proto = VisProtocolServer(port=int(config.get("tcp_port", 9410)),
+                                            callbacks=callbacks).start()
+
+    def _proto_status(self) -> dict:
+        return {
+            "running": self._runner is not None,
+            "batch": self._batch_no.text().strip() or None,
+            "recipe": self._recipe_combo.currentText(),
+            "alarm": "ALARM" in self._state.text() or None,
+        }
+
+    def _proto_counters(self) -> dict:
+        totals = self._stats.totals()
+        return {"total": totals["total"], "passed": totals["passed"],
+                "failed": totals["failed"], "yield": round(totals.get("yield", 0.0), 2)}
+
+    def _proto_recipes(self) -> list:
+        return [
+            {"id": self._recipe_combo.itemData(i), "name": self._recipe_combo.itemText(i)}
+            for i in range(self._recipe_combo.count())
+        ]
+
+    def comms_status(self) -> str:
+        if self._proto is None:
+            return "Integration server: disabled."
+        return (f"Integration server: listening on port {self._proto.port}, "
+                f"{self._proto.client_count()} client(s) connected.")
+
+    def open_events(self) -> None:
+        if self._sf is None:
+            self.statusBar().showMessage("No database — events unavailable.")
+            return
+        from .events_window import EventsWindow
+
+        self._events_window = EventsWindow(self._sf, self)
+        self._events_window.resize(760, 480)
+        self._events_window.show()
+
+    def open_comms(self) -> None:
+        if self._sf is None:
+            self.statusBar().showMessage("No database — comms unavailable.")
+            return
+        from .comms_window import CommsWindow
+
+        self._comms_window = CommsWindow(
+            self._sf, apply_callback=self._apply_comms, status_provider=self.comms_status, parent=self
+        )
+        self._comms_window.resize(520, 620)
+        self._comms_window.show()
+
+    def closeEvent(self, event) -> None:  # fail-safe: drop READY, stop server
+        if self._signals is not None:
+            self._signals.close()
+        if self._proto is not None:
+            self._proto.stop()
+        super().closeEvent(event)
 
     def _can(self, perm: str) -> bool:
         """True when the logged-in user holds `perm` (no DB/dev mode = allow)."""
@@ -425,6 +561,7 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"Batch #{released_id} released — report: {html_path}")
         except Exception as exc:
             self.statusBar().showMessage(f"Batch #{released_id} released; report failed: {exc}")
+        self._log_event("info", "batch", f"Batch #{released_id} released")
         self._batch_id = None
         self._close_batch.setEnabled(False)
 
@@ -438,6 +575,11 @@ class MainWindow(QMainWindow):
         self._start.setEnabled(True)
         self._stop.setEnabled(False)
         self._set_state("Idle", "#888")
+        if self._signals is not None:
+            self._signals.set_running(False)
+        if self._proto is not None:
+            self._proto.push_state(False, None)
+        self._log_event("info", "run", "Inspection stopped")
         self.statusBar().showMessage("Stopped")
 
     def import_recipe(self) -> None:
@@ -677,10 +819,14 @@ class MainWindow(QMainWindow):
             if streak >= self._alarm_threshold:
                 self.stop()
                 self._set_state(f"ALARM — {streak} consecutive rejects, line stopped", "#c22")
-                self.statusBar().showMessage(
-                    f"ALARM: {streak} consecutive rejects — line stopped. "
-                    "Check the printer/coder and product feed, then review rejects."
-                )
+                message = (f"ALARM: {streak} consecutive rejects — line stopped. "
+                           "Check the printer/coder and product feed, then review rejects.")
+                self.statusBar().showMessage(message)
+                if self._signals is not None:
+                    self._signals.set_alarm(True)
+                if self._proto is not None:
+                    self._proto.push_alarm("CONSECUTIVE_REJECTS", message)
+                self._log_event("alarm", "line", message)
                 return
 
         # auto-stop when a bounded source (e.g. sim/file) has finished

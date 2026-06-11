@@ -207,6 +207,29 @@ class AuditEntry(Base):
     entry_hash: Mapped[str] = mapped_column(String(64))
 
 
+class SettingRow(Base):
+    """Application key/value settings (JSON values) — e.g. comms config."""
+
+    __tablename__ = "app_settings"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    key: Mapped[str] = mapped_column(String(64), unique=True)
+    value: Mapped[dict | None] = mapped_column(JSONType, default=dict)
+    updated_at: Mapped[str] = mapped_column(String(40), default=_utcnow_iso)
+
+
+class EventRow(Base):
+    """Operational event/alarm log (run/stop, alarms, batch events) — the
+    line-side log operators read, distinct from the Part-11 audit trail."""
+
+    __tablename__ = "events"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ts: Mapped[str] = mapped_column(String(40), default=_utcnow_iso)
+    severity: Mapped[str] = mapped_column(String(8), default="info")  # info/warn/alarm
+    source: Mapped[str] = mapped_column(String(64), default="")
+    message: Mapped[str] = mapped_column(Text, default="")
+    batch_id: Mapped[int | None] = mapped_column(ForeignKey("batches.id"))
+
+
 class FontModelRow(Base):
     """A trained OCV font: per-character glyph templates for one print
     technology/size (docs/11-ocv-fonts.md). glyphs = {char: [b64 PNG, ...]}."""

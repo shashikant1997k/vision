@@ -18,13 +18,60 @@ def _sim_factory(camera_id, settings, recipe):
     return SimulatedCodeCamera(camera_id, recipe, num_frames=60, defect_rate=0.25, seed=0)
 
 
+def _hik_device_for(camera_id: str) -> dict:
+    """Map a logical camera id to a physical Hikrobot device.
+
+    VIS_HIK_MAP="cam1:0,cam2:1" (enumeration indexes) or
+    VIS_HIK_MAP="cam1=DA1234567,cam2=DA1234568" (serials). Without a map, the
+    trailing digit of the id picks the index (cam1 -> 0, cam2 -> 1)."""
+    import os
+    import re
+
+    mapping = os.environ.get("VIS_HIK_MAP", "")
+    for entry in (e.strip() for e in mapping.split(",") if e.strip()):
+        if ":" in entry:
+            cid, _, idx = entry.partition(":")
+            if cid.strip() == camera_id:
+                return {"device_index": int(idx)}
+        elif "=" in entry:
+            cid, _, serial = entry.partition("=")
+            if cid.strip() == camera_id:
+                return {"serial": serial.strip()}
+    digits = re.findall(r"(\d+)$", camera_id)
+    return {"device_index": max(0, int(digits[0]) - 1) if digits else 0}
+
+
 def _make_camera_factory():
-    """Pick the acquisition source: a real GigE camera when a GenTL producer is
-    configured (VIS_GENTL_CTI), else the simulator. Returns (factory, simulation)."""
+    """Pick the acquisition source, best first:
+    1. Hikrobot MVS SDK   (VIS_CAMERA=hikrobot, or auto when the SDK imports)
+    2. GenTL / Harvester  (VIS_GENTL_CTI set — any GigE Vision camera)
+    3. Simulator          (development; the HMI shows a SIMULATION banner)
+    Returns (factory, simulation)."""
     import os
 
+    choice = os.environ.get("VIS_CAMERA", "auto").lower()
+
+    def hik_available() -> bool:
+        try:
+            from ..camera.hikrobot import load_sdk
+
+            load_sdk()
+            return True
+        except Exception:
+            return False
+
+    if choice == "hikrobot" or (choice == "auto" and hik_available()):
+        def hik_factory(camera_id, settings, recipe):
+            from ..camera.hikrobot import HikrobotCamera
+
+            camera = HikrobotCamera(camera_id, settings=settings, **_hik_device_for(camera_id))
+            camera.open()
+            return camera
+
+        return hik_factory, False
+
     cti = os.environ.get("VIS_GENTL_CTI")
-    if cti:
+    if choice == "gige" or (choice == "auto" and cti):
         def gige_factory(camera_id, settings, recipe):
             from ..camera.genicam import HarvesterCamera
 

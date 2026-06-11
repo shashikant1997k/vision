@@ -53,3 +53,25 @@ Sources: [EBS CIJ](https://ebs-inkjet.de/en/products/cij/),
 [Keyence OCR/OCV](https://www.keyence.com/products/vision/vision-sys/applications/ocr-verification-and-character-inspection.jsp),
 [Clearview: OCR for machine vision](https://clearview-imaging.com/blogs/news/introduction-to-optical-character-recognition-for-machine-vision),
 [AIA OCR/OCV insights](https://www.automate.org/vision/industry-insights/the-latest-on-ocr-ocv-machine-vision-applications).
+
+## Research-validated architecture (deep-research pass, 2026-06)
+
+A 106-agent research sweep (Cognex OCVMax/CVL docs, Keyence, Zebra Aurora,
+US 5,212,741, AIA) adversarially verified 23 claims. What it confirmed and what
+we implemented from it:
+
+| Verified finding | Status in our engine |
+|---|---|
+| OCV (verify against expected) and OCR (read) are architecturally distinct; pharma verification should be OCV-first | ✅ `verify_text` per-position vs expected; OCR is the read/fallback path |
+| Whitespace segmentation structurally fails on dot print; dot-connect must happen at GREY level (spatial average, kernel ∝ dot pitch) before binarization | ✅ `_prepare_binary`: grey blur (kernel = font dot_kernel) → contrast stretch → binarize; per-print-type kernel in the font model |
+| OCVMax decision gate = accept threshold + confusion check + top-1-minus-top-2 margin | ✅ `verify_text` margin gate (`char_margin`, default 0.05) |
+| Per-character threshold tuning is the robustness lever for hard substrates | ✅ `min_char_score` / `char_margin` per tool config |
+| Floors: chars ≥ ~20×15 px and ≥ ~30 grey levels of contrast, else fix optics/lighting | ✅ teach-time warnings (`print_quality`) shown on Test |
+| Charset/lexicon constraining improves accuracy (all vendors) | ✅ per-field Charset (digits/letters/alnum/custom) on the OCV tool |
+| Multi-exemplar registration per character; augment with small rotation/shear/dilate/erode (excess degrades) | ✅ best-of-list NCC + auto-augmentation on training (±3°, dilate/erode) |
+| Commercial trend: pretrained DL readers (Zebra Aurora DL-OCR, Keyence AI-OCR) with per-char confidence gates complement classical OCV | ✅ reader seam ready for a licensed engine; confidence gating present |
+
+Open (needs hands-on benchmarking, no verified external data): which ONNX
+recognizer (PP-OCRv5/SVTR/PARSeq) fine-tunes best on dot-matrix fonts — use
+`vis-ocrbench` golden sets to decide empirically; specular/blister + laser-on-
+glass preprocessing recipes; photometric stereo for embossed/dot-peen.

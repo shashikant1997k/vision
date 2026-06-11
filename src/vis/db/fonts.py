@@ -75,9 +75,15 @@ class FontRepository:
             s.commit()
             return row.id
 
-    def add_samples(self, by_user: int, font_id: int, labelled: list[tuple[str, str]]) -> int:
-        """Train: add annotated (char, template_b64) samples. Returns total
-        samples in the font afterwards."""
+    def add_samples(
+        self, by_user: int, font_id: int, labelled: list[tuple[str, str]], augment: bool = True
+    ) -> int:
+        """Train: add annotated (char, template_b64) samples. With `augment`
+        (default), each sample also contributes small synthetic variants
+        (rotation, dilate/erode — the vendor-documented practice), so a single
+        annotated sample is worth several exemplars. Returns total samples."""
+        from ..tools.fontgen import augment_glyph
+
         with self._sf() as s:
             require(s, by_user, Perm.RECIPE_CREATE)
             row = s.get(FontModelRow, font_id)
@@ -89,6 +95,8 @@ class FontRepository:
                 if len(ch) != 1 or not template:
                     continue
                 glyphs.setdefault(ch, []).append(template)
+                if augment:
+                    glyphs[ch].extend(augment_glyph(template))
             row.glyphs = glyphs
             AuditService(s).record(
                 "font.train", "font", font_id, user_id=by_user,

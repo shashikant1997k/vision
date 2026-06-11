@@ -73,10 +73,14 @@ def _solid_glyph(ch: str) -> str | None:
     return _to_template((tight > 64).astype(np.uint8) * 255)
 
 
-def _dot_glyph(ch: str, grid=(5, 7), dot_px=6, gap_px=3) -> str | None:
-    """Sample a solid glyph onto a rows×cols dot grid and draw round dots —
-    what a CIJ coder does physically."""
+def _dot_glyph(ch: str, grid=(5, 7), dot_px=6, gap_px=3, kernel: int = 5) -> str | None:
+    """Sample a solid glyph onto a rows×cols dot grid, draw round dots (what a
+    CIJ coder does physically), then run it through the SAME grey-level
+    dot-connect pipeline used at read time — templates and reads must always be
+    produced by one pipeline or matching degrades."""
     import cv2
+
+    from .ocv_font import _prepare_binary
 
     cols, rows = grid
     tight = _tight(_render_solid(ch))
@@ -90,7 +94,10 @@ def _dot_glyph(ch: str, grid=(5, 7), dot_px=6, gap_px=3) -> str | None:
             if cells[r, c]:
                 cy, cx = r * pitch + pitch // 2, c * pitch + pitch // 2
                 cv2.circle(canvas, (cx, cy), dot_px // 2, 255, -1)
-    tight_dots = _tight(canvas)
+    connected = _prepare_binary(canvas, invert=False, dot_kernel=kernel)
+    tight_dots = _tight(connected)
+    if tight_dots is None:
+        tight_dots = _tight(canvas)
     return _to_template(tight_dots)
 
 
@@ -98,8 +105,8 @@ def builtin_fonts() -> list[dict]:
     """Generated starter font models (name, print_type, dot_kernel, glyphs)."""
     fonts = []
     specs = [
-        ("Dot matrix 5×7 (CIJ)", "cij", 7, lambda ch: _dot_glyph(ch, (5, 7))),
-        ("Dot matrix 9×7 (CIJ quality)", "cij", 5, lambda ch: _dot_glyph(ch, (7, 9), dot_px=5, gap_px=2)),
+        ("Dot matrix 5×7 (CIJ)", "cij", 7, lambda ch: _dot_glyph(ch, (5, 7), kernel=7)),
+        ("Dot matrix 9×7 (CIJ quality)", "cij", 5, lambda ch: _dot_glyph(ch, (7, 9), dot_px=5, gap_px=2, kernel=5)),
         ("Solid print (TIJ/TTO/laser)", "tto", 0, _solid_glyph),
     ]
     for name, print_type, kernel, make in specs:
@@ -112,18 +119,43 @@ def builtin_fonts() -> list[dict]:
     return fonts
 
 
+def augment_glyph(template_b64: str) -> list[str]:
+    """Vendor-documented training augmentation (conservative: rotation ±3°,
+    1-px dilate/erode simulating ink spread/starvation). Excessive deformation
+    is documented to DEGRADE classifiers, so the variants stay small."""
+    import cv2
+
+    glyph = base64.b64decode(template_b64)
+    arr = cv2.imdecode(np.frombuffer(glyph, np.uint8), cv2.IMREAD_GRAYSCALE)
+    if arr is None:
+        return []
+    h, w = arr.shape[:2]
+    variants = []
+    for angle in (-3, 3):
+        matrix = cv2.getRotationMatrix2D((w / 2, h / 2), angle, 1.0)
+        variants.append(cv2.warpAffine(arr, matrix, (w, h)))
+    kernel = np.ones((2, 2), np.uint8)
+    variants.append(cv2.dilate(arr, kernel))
+    variants.append(cv2.erode(arr, kernel))
+    out = []
+    for variant in variants:
+        ok, buf = cv2.imencode(".png", variant)
+        if ok:
+            out.append(base64.b64encode(buf.tobytes()).decode("ascii"))
+    return out
+
+
 def segment_sample(image, text: str, invert=None, dot_kernel: int = 0, min_area: int = 10):
     """Segment a training sample into per-character glyphs for annotation.
 
     Returns [(suggested_char, template_b64), ...] in left-to-right order, one per
     non-space character of `text` (the operator corrects any wrong suggestion)."""
-    from .ocv_font import _binarize, _dot_connect, _even_split, _gray, _norm_glyph
-
     import cv2
 
+    from .ocv_font import _even_split, _gray, _norm_glyph, _prepare_binary
+
     chars = [c for c in text.upper() if not c.isspace()]
-    gray = _gray(np.asarray(image))
-    binary = _dot_connect(_binarize(gray, invert), dot_kernel)
+    binary = _prepare_binary(_gray(np.asarray(image)), invert, dot_kernel)
     boxes = _even_split(binary, len(chars))
     out = []
     for ch, box in zip(chars, boxes):

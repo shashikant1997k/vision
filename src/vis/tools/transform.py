@@ -84,3 +84,26 @@ def locate_text_band(image, pad: int = 6, prefer=None) -> np.ndarray:
     # full width: only the LINE needs isolating (neighbouring lines above/below
     # are what corrupt the read); horizontal drift is handled by recognition
     return arr[y0:y1]
+
+
+def print_quality(image) -> dict:
+    """Teach-time quality check against the documented classical-OCV floors
+    (characters at least ~20 px tall, at least ~30 grey levels of contrast).
+    Returns {"char_height_px", "contrast_levels", "warnings": [...]}."""
+    arr = np.asarray(image)
+    band = locate_text_band(arr, pad=0)
+    height = int(band.shape[0])
+    band_gray = band[..., :3].mean(axis=2) if band.ndim == 3 else band.astype(np.float32)
+    low, high = float(np.percentile(band_gray, 2)), float(np.percentile(band_gray, 98))
+    contrast = int(high - low)
+    warnings = []
+    if 0 < height < 20:
+        warnings.append(
+            f"characters ≈{height}px tall — below the ~20px floor; increase "
+            "magnification or camera resolution"
+        )
+    if contrast < 30:
+        warnings.append(
+            f"only ≈{contrast} grey levels of contrast — improve lighting/strobe"
+        )
+    return {"char_height_px": height, "contrast_levels": contrast, "warnings": warnings}

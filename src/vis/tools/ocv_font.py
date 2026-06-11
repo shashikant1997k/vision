@@ -59,6 +59,21 @@ def _dot_connect(binary, kernel):
     return binary
 
 
+def _prepare_binary(gray, invert, dot_kernel):
+    """The documented dot-matrix pipeline (US 5,212,741; modern equivalent):
+    GREY-LEVEL spatial averaging smooths dots into strokes (kernel scaled to the
+    dot pitch), contrast stretch, THEN binarize — far more stable than closing a
+    noisy binary image. A small binary close still mops up residual gaps."""
+    import cv2
+
+    if dot_kernel and dot_kernel > 1:
+        k = int(dot_kernel)
+        gray = cv2.blur(gray, (k, k))
+        gray = cv2.normalize(gray, None, 0, 255, cv2.NORM_MINMAX).astype("uint8")
+    binary = _binarize(gray, invert)
+    return _dot_connect(binary, min(3, int(dot_kernel or 0)))
+
+
 def _char_boxes(binary, min_area):
     import cv2
 
@@ -137,8 +152,7 @@ def register_font(image, text, font=None, invert=None, dot_kernel=0, min_area=10
     """Add the glyphs in `text` (the operator types what the sample says) to a
     font model. Returns {char: [base64 glyph, ...]} merging into `font`."""
     font = {k: list(v) for k, v in (font or {}).items()}
-    gray = _gray(image)
-    binary = _dot_connect(_binarize(gray, invert), dot_kernel)
+    binary = _prepare_binary(_gray(image), invert, dot_kernel)
     chars = [c for c in text if not c.isspace()]
     boxes = _even_split(binary, len(chars))  # text is known -> split by count
     for ch, box in zip(chars, boxes):
@@ -179,15 +193,31 @@ def _even_split(binary, n):
     return [(bounds[k], y0, max(1, bounds[k + 1] - bounds[k]), y1 - y0 + 1) for k in range(n)]
 
 
-def read_text(image, font, n_chars=None, invert=None, dot_kernel=0, min_area=10, min_char_score=0.3):
+def _filter_charset(font: dict, charset: str | None) -> dict:
+    """Vendor-documented lexicon constraining: restrict candidate characters to
+    what the field can contain (digits-only dates, etc.)."""
+    if not charset:
+        return font
+    allowed = {
+        "digits": set("0123456789"),
+        "letters": set("ABCDEFGHIJKLMNOPQRSTUVWXYZ"),
+        "alnum": set("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"),
+    }.get(charset)
+    if allowed is None:
+        allowed = set(charset.upper())  # explicit set, e.g. "0123456789./"
+    return {ch: tpls for ch, tpls in font.items() if ch in allowed} or font
+
+
+def read_text(image, font, n_chars=None, invert=None, dot_kernel=0, min_area=10,
+              min_char_score=0.3, charset=None):
     """Read text using the registered `font`. If `n_chars` is known (we're
     verifying a value of known length) the ROI is split by count. Returns
     (text, mean_score)."""
     if not font:
         return "", 0.0
-    templates = {ch: [_decode(t) for t in tpls] for ch, tpls in font.items()}
-    gray = _gray(image)
-    binary = _dot_connect(_binarize(gray, invert), dot_kernel)
+    templates = _filter_charset(font, charset)
+    templates = {ch: [_decode(t) for t in tpls] for ch, tpls in templates.items()}
+    binary = _prepare_binary(_gray(image), invert, dot_kernel)
     out = []
     scores = []
     for box in _split_boxes(binary, n_chars, min_area):
@@ -203,7 +233,8 @@ def read_text(image, font, n_chars=None, invert=None, dot_kernel=0, min_area=10,
     return "".join(out), (sum(scores) / len(scores) if scores else 0.0)
 
 
-def verify_text(image, font, expected, invert=None, dot_kernel=0, min_char_score=0.5):
+def verify_text(image, font, expected, invert=None, dot_kernel=0, min_char_score=0.5,
+                margin=0.05):
     """OCV verification: split the print into len(expected) characters and score
     each position against the EXPECTED character's templates only. Returns
     (readback, mean_score, char_scores) where readback shows the expected char
@@ -211,8 +242,7 @@ def verify_text(image, font, expected, invert=None, dot_kernel=0, min_char_score
     chars = [c for c in expected.upper() if not c.isspace()]
     if not chars or not font:
         return "", 0.0, []
-    gray = _gray(image)
-    binary = _dot_connect(_binarize(gray, invert), dot_kernel)
+    binary = _prepare_binary(_gray(image), invert, dot_kernel)
     boxes = _even_split(binary, len(chars))
     if len(boxes) != len(chars):
         return "", 0.0, [0.0] * len(chars)
@@ -221,10 +251,19 @@ def verify_text(image, font, expected, invert=None, dot_kernel=0, min_char_score
     scores = []
     for ch, box in zip(chars, boxes):
         glyph = _norm_glyph(binary, box)
-        candidates = templates.get(ch, [])
-        best = max((_ncc(glyph, tpl) for tpl in candidates), default=0.0)
+        best = max((_ncc(glyph, tpl) for tpl in templates.get(ch, [])), default=0.0)
+        # OCVMax-style confusion gate: the expected character must also BEAT the
+        # best-scoring OTHER character by `margin` (top-1 minus top-2) — catches
+        # a misprint that resembles the expected glyph but matches another more.
+        best_other = 0.0
+        for other, tpls in templates.items():
+            if other == ch:
+                continue
+            score_other = max((_ncc(glyph, tpl) for tpl in tpls), default=0.0)
+            best_other = max(best_other, score_other)
+        ok = best >= min_char_score and (best - best_other) >= margin
         scores.append(max(0.0, best))
-        readback.append(ch if best >= min_char_score else "?")
+        readback.append(ch if ok else "?")
     return "".join(readback), (sum(scores) / len(scores)), scores
 
 
@@ -255,6 +294,7 @@ class FontOcvTool(InspectionTool):
                 invert=cfg.get("invert"),
                 dot_kernel=cfg.get("dot_kernel", 0),
                 min_char_score=cfg.get("min_char_score", 0.5),
+                margin=cfg.get("char_margin", 0.05),
             )
         else:
             text, score = read_text(
@@ -265,6 +305,7 @@ class FontOcvTool(InspectionTool):
                 dot_kernel=cfg.get("dot_kernel", 0),
                 min_area=cfg.get("min_area", 10),
                 min_char_score=cfg.get("min_char_score", 0.45),
+                charset=cfg.get("charset"),
             )
         measured = text.strip()
         mode = cfg.get("match", "exact")

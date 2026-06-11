@@ -166,7 +166,7 @@ def test_font_manager_train_flow(tmp_path):
 
     fid = repo.create_font(eng, "Trained via UI", "tto", 0)
     total = repo.add_samples(eng, fid, dlg.labelled)
-    assert total == 7
+    assert total == 7 * 5  # each annotated glyph + 4 augmented variants
 
 
 def test_ocv_verify_mode_scores_against_expected(tmp_path):
@@ -189,4 +189,68 @@ def test_ocv_verify_mode_scores_against_expected(tmp_path):
     result = bad.inspect(image)
     assert not result.passed
     assert result.measured_value[2] == "?"          # the wrong position flagged
-    assert result.detail["char_scores"][2] < 0.5    # low score exactly there
+    # gated by accept threshold + the top-1-minus-top-2 margin (the printed '2'
+    # matches '2' better than the expected '7')
+    assert result.detail["char_scores"][2] <= 0.55
+
+
+def test_margin_gate_rejects_lookalike_of_another_char():
+    """OCVMax-style confusion gate: a printed '8' must NOT verify as '0' even if
+    its NCC vs '0' clears the accept threshold — '8' matches itself better
+    (top-1 minus top-2 margin)."""
+    from vis.tools.ocv_font import verify_text
+
+    solid = next(f for f in builtin_fonts() if "Solid" in f["name"])
+    image_8 = _compose(solid["glyphs"], "8")
+    readback, _score, scores = verify_text(image_8, solid["glyphs"], "0",
+                                           min_char_score=0.3, margin=0.05)
+    assert readback == "?"  # rejected by the margin gate
+    # and the genuine character still verifies
+    readback, _score, _ = verify_text(image_8, solid["glyphs"], "8")
+    assert readback == "8"
+
+
+def test_charset_restriction_limits_candidates():
+    from vis.tools.ocv_font import read_text
+
+    solid = next(f for f in builtin_fonts() if "Solid" in f["name"])
+    image = _compose(solid["glyphs"], "2026")
+    text, _ = read_text(image, solid["glyphs"], n_chars=4, charset="digits")
+    assert text == "2026"
+    assert all(c.isdigit() for c in text)
+
+
+def test_augmentation_multiplies_training_samples(tmp_path):
+    from vis.tools.fontgen import augment_glyph
+
+    sf, eng, _ = _setup(tmp_path)
+    repo = FontRepository(sf)
+    solid = next(f for f in builtin_fonts() if "Solid" in f["name"])
+    template = solid["glyphs"]["A"][0]
+    assert len(augment_glyph(template)) == 4  # ±3° rotation + dilate + erode
+
+    fid = repo.create_font(eng, "Aug", "tto", 0)
+    total = repo.add_samples(eng, fid, [("A", template)], augment=True)
+    assert total == 5  # original + 4 variants
+    total = repo.add_samples(eng, fid, [("B", template)], augment=False)
+    assert total == 6
+
+
+def test_print_quality_floors():
+    import numpy as np
+
+    from vis.engine.sim import _render_text
+    from vis.tools.transform import print_quality
+
+    good = _render_text("LOT42", 360, 90)  # tall, high contrast
+    q = print_quality(good)
+    assert q["warnings"] == []
+
+    tiny = _render_text("LOT42", 70, 14)   # chars ~10px tall
+    q = print_quality(tiny)
+    assert any("20px" in w for w in q["warnings"])
+
+    flat = np.full((60, 200, 3), 128, np.uint8)
+    flat[20:40, 20:180] = 138               # ~10 grey levels of contrast
+    q = print_quality(flat)
+    assert any("grey levels" in w for w in q["warnings"])

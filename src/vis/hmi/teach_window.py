@@ -424,6 +424,15 @@ class TeachWindow(QMainWindow):
         self._t_reader = QComboBox()
         self._t_reader.setToolTip("Reading engine — a licensed OCR/OCV library appears here once installed.")
         self._t_reader.currentTextChanged.connect(self._tool_edited)
+        self._t_charset = QComboBox()
+        for label, key in (("Any character", ""), ("Digits only", "digits"),
+                           ("Letters only", "letters"), ("Letters + digits", "alnum")):
+            self._t_charset.addItem(label, key)
+        self._t_charset.setToolTip(
+            "Restrict which characters this field can contain (digits-only dates "
+            "kill 0/O, 5/S confusion) — documented vendor practice."
+        )
+        self._t_charset.currentIndexChanged.connect(self._tool_edited)
         self._t_font = QComboBox()
         self._t_font.setToolTip(
             "Trained OCV font (print technology + size). Train more in Fonts…"
@@ -446,6 +455,7 @@ class TeachWindow(QMainWindow):
         form.addRow("Search ↕ T/B", self._t_search_y)
         form.addRow("Min confidence", self._t_minconf)
         form.addRow("Font", self._t_font)
+        form.addRow("Charset", self._t_charset)
         form.addRow("", self._t_required)
         form.addRow("Last read", self._t_lastread)
         self._tool_form = form
@@ -827,6 +837,9 @@ class TeachWindow(QMainWindow):
             self._t_search_y.setValue(int(tool.config.get("search_y", _legacy) or 0))
             is_font_tool = tool.tool_type == "ocv_font"
             self._tool_form.setRowVisible(self._t_font, is_font_tool)
+            self._tool_form.setRowVisible(self._t_charset, is_font_tool)
+            idx = self._t_charset.findData((tool.config or {}).get("charset", "") or "")
+            self._t_charset.setCurrentIndex(idx if idx >= 0 else 0)
             if is_font_tool:
                 self._load_fonts(tool)
             self._t_lastread.setText(self._last_read_for(region.region_id, tool.tool_id))
@@ -948,6 +961,8 @@ class TeachWindow(QMainWindow):
             for key in FONT_KEYS:  # the trained font must survive match edits
                 if key in (tool.config or {}):
                     cfg[key] = tool.config[key]
+            if self._t_charset.currentData():
+                cfg["charset"] = self._t_charset.currentData()
         tool.config = cfg
         self._t_value.setPlaceholderText(value_hint(tool.tool_type, mode))
         self._sync_tool_inputs(mode)
@@ -1053,7 +1068,29 @@ class TeachWindow(QMainWindow):
                     detail += "  [chars " + " ".join(f"{v:.2f}" for v in scores) + "]"
                 lines.append(f"   {mark} {tr.tool_id}: read “{read}”{detail}")
         lines += self._locator_diagnostics()
+        lines += self._quality_warnings()
         return "\n".join(lines)
+
+    def _quality_warnings(self) -> list[str]:
+        """Documented classical-OCV floors: chars >= ~20px tall, >= ~30 grey
+        levels of contrast — warn at teach time, when it's fixable."""
+        from ..tools.transform import print_quality
+
+        teach = self._teach_image()
+        out = []
+        for region in self._model.regions:
+            for tool in region.tools:
+                if tool.tool_type not in ("ocv_text", "ocv_font", "code_verify"):
+                    continue
+                x = region.roi.x + tool.roi.x
+                y = region.roi.y + tool.roi.y
+                crop = teach[y : y + tool.roi.h, x : x + tool.roi.w]
+                if crop.size == 0:
+                    continue
+                quality = print_quality(crop)
+                for warning in quality["warnings"]:
+                    out.append(f"   ⚠ {tool.tool_id}: {warning}")
+        return out
 
     def _locator_diagnostics(self) -> list[str]:
         """Report, per product with a part locator, whether the locator found the

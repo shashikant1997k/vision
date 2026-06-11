@@ -134,10 +134,10 @@ def test_teach_ocv_font_tool(tmp_path):
     embedded = tool.config["font_name"]
 
     # editing the match mode must NOT lose the trained font
-    win._t_mode.setCurrentText("Matches batch field")
+    win._t_mode.setCurrentText("Contains text")
     assert win._model.regions[0].tools[0].config.get("font")
     assert win._model.regions[0].tools[0].config.get("font_name") == embedded
-    assert win._model.regions[0].tools[0].config.get("match") == "batch_field"
+    assert win._model.regions[0].tools[0].config.get("match") == "contains"
 
 
 def test_font_manager_train_flow(tmp_path):
@@ -167,3 +167,26 @@ def test_font_manager_train_flow(tmp_path):
     fid = repo.create_font(eng, "Trained via UI", "tto", 0)
     total = repo.add_samples(eng, fid, dlg.labelled)
     assert total == 7
+
+
+def test_ocv_verify_mode_scores_against_expected(tmp_path):
+    """True OCV: each position scored against the EXPECTED character — a wrong
+    digit fails with a low per-char score; no irrelevant classification."""
+    dot = next(f for f in builtin_fonts() if "5×7" in f["name"])
+    image = _compose(dot["glyphs"], "2024")
+
+    good = build_tool("ocv_font", "exp", {
+        "font": dot["glyphs"], "match": "exact", "expected": "2024",
+        "dot_kernel": dot["dot_kernel"]})
+    result = good.inspect(image)
+    assert result.passed and result.measured_value == "2024"
+    assert len(result.detail["char_scores"]) == 4
+    assert all(v >= 0.5 for v in result.detail["char_scores"])
+
+    bad = build_tool("ocv_font", "exp", {
+        "font": dot["glyphs"], "match": "exact", "expected": "2074",
+        "dot_kernel": dot["dot_kernel"]})
+    result = bad.inspect(image)
+    assert not result.passed
+    assert result.measured_value[2] == "?"          # the wrong position flagged
+    assert result.detail["char_scores"][2] < 0.5    # low score exactly there

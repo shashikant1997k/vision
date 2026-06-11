@@ -64,7 +64,8 @@ PATTERN = "Matches pattern"
 BATCH_FIELD = "Matches batch field"
 
 CODE_MODES = [FIXED, ANY_CODE, PATTERN]
-TEXT_MODES = [FIXED, CONTAINS, PATTERN, BATCH_FIELD]
+# batch-field stays supported for legacy recipes but is no longer offered in teach
+TEXT_MODES = [FIXED, CONTAINS, PATTERN]
 
 ROTATIONS = [0, 90, 180, 270]
 

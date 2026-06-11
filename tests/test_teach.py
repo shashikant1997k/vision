@@ -250,7 +250,7 @@ def test_teach_draw_after_deleting_all_products_does_not_crash(tmp_path):
     assert len(win._model.regions[0].tools) == 1
 
 
-def test_teach_batch_field_and_rotation(tmp_path):
+def test_teach_rotation_and_simplified_modes(tmp_path):
     pytest.importorskip("PySide6")
     _qapp()
     sf, qa_id = _qa_setup(tmp_path)
@@ -258,12 +258,48 @@ def test_teach_batch_field_and_rotation(tmp_path):
     win._arm_tool("ocv_text")
     win._on_roi_drawn(10, 10, 80, 24)
 
-    win._t_mode.setCurrentText("Matches batch field")  # fed before every batch
-    config = win._model.regions[0].tools[0].config
-    assert config["match"] == "batch_field" and config["field"] == "lot"
+    # batch-field is no longer offered in teach (simplified properties)
+    modes = [win._t_mode.itemText(i) for i in range(win._t_mode.count())]
+    assert "Matches batch field" not in modes
+    assert modes == ["Fixed value", "Contains text", "Matches pattern"]
 
     win._t_rotation.setCurrentText("90°")  # sideways print
     assert win._model.regions[0].tools[0].config.get("rotation") == 90
+
+
+def test_teach_required_checkbox_works_end_to_end(tmp_path):
+    """Unchecking Required must make a failing inspection informational only."""
+    pytest.importorskip("PySide6")
+    _qapp()
+    sf, qa_id = _qa_setup(tmp_path)
+    win = _teach_window(sf, qa_id)
+    win._arm_tool("code_verify")
+    win._on_roi_drawn(30, 30, 300, 300)
+    win._t_mode.setCurrentText("Fixed value")
+    win._t_value.setText("WRONG-VALUE")        # guaranteed mismatch -> fails
+
+    results = win._model.test(win._reference)
+    assert not all(r.passed for r in results)  # required + failing -> reject
+
+    win._selected = ("tool", 0, 0)
+    win._load_properties()
+    win._t_required.setChecked(False)          # toggle the checkbox
+    assert win._model.regions[0].tools[0].config.get("required") is False
+    results = win._model.test(win._reference)
+    assert all(r.passed for r in results)      # optional + failing -> product passes
+
+
+def test_teach_tree_grows_with_inspections(tmp_path):
+    pytest.importorskip("PySide6")
+    _qapp()
+    sf, qa_id = _qa_setup(tmp_path)
+    win = _teach_window(sf, qa_id)
+    initial = win._tree.height() or win._tree.minimumHeight()
+    for i in range(6):
+        win._arm_tool("ocv_text")
+        win._on_roi_drawn(10 + i * 5, 10, 60, 20)
+    grown = win._tree.minimumHeight()
+    assert grown > initial  # 4 rows initially, grows as lines are added
 
 
 def test_teach_save_validation_blocks_bad_recipes(tmp_path):

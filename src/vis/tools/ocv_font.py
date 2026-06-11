@@ -203,6 +203,31 @@ def read_text(image, font, n_chars=None, invert=None, dot_kernel=0, min_area=10,
     return "".join(out), (sum(scores) / len(scores) if scores else 0.0)
 
 
+def verify_text(image, font, expected, invert=None, dot_kernel=0, min_char_score=0.5):
+    """OCV verification: split the print into len(expected) characters and score
+    each position against the EXPECTED character's templates only. Returns
+    (readback, mean_score, char_scores) where readback shows the expected char
+    where it verified and '?' where it didn't."""
+    chars = [c for c in expected.upper() if not c.isspace()]
+    if not chars or not font:
+        return "", 0.0, []
+    gray = _gray(image)
+    binary = _dot_connect(_binarize(gray, invert), dot_kernel)
+    boxes = _even_split(binary, len(chars))
+    if len(boxes) != len(chars):
+        return "", 0.0, [0.0] * len(chars)
+    templates = {ch: [_decode(t) for t in tpls] for ch, tpls in font.items()}
+    readback = []
+    scores = []
+    for ch, box in zip(chars, boxes):
+        glyph = _norm_glyph(binary, box)
+        candidates = templates.get(ch, [])
+        best = max((_ncc(glyph, tpl) for tpl in candidates), default=0.0)
+        scores.append(max(0.0, best))
+        readback.append(ch if best >= min_char_score else "?")
+    return "".join(readback), (sum(scores) / len(scores)), scores
+
+
 @register
 class FontOcvTool(InspectionTool):
     """Font-trained OCV text verification (handles dot-matrix / customer fonts)."""
@@ -216,19 +241,31 @@ class FontOcvTool(InspectionTool):
             from .transform import locate_text_band
 
             roi_image = locate_text_band(roi_image, prefer=cfg.get("_inner_roi"))
-        # for verification we know the expected value -> know the character count,
-        # which lets us split the ROI reliably (monospace coder fonts)
         expected_str = cfg.get("expected") or ""
         n_chars = len([c for c in expected_str if not c.isspace()]) or None
-        text, score = read_text(
-            roi_image,
-            cfg.get("font") or {},
-            n_chars=n_chars,
-            invert=cfg.get("invert"),
-            dot_kernel=cfg.get("dot_kernel", 0),
-            min_area=cfg.get("min_area", 10),
-            min_char_score=cfg.get("min_char_score", 0.3),
-        )
+        char_scores: list[float] = []
+        if cfg.get("match", "exact") == "exact" and expected_str and cfg.get("font"):
+            # TRUE OCV: verify each character position against the EXPECTED
+            # character's templates (never classify across the whole font — no
+            # "irrelevant" reads; either the print matches or it doesn't).
+            text, score, char_scores = verify_text(
+                roi_image,
+                cfg["font"],
+                expected_str,
+                invert=cfg.get("invert"),
+                dot_kernel=cfg.get("dot_kernel", 0),
+                min_char_score=cfg.get("min_char_score", 0.5),
+            )
+        else:
+            text, score = read_text(
+                roi_image,
+                cfg.get("font") or {},
+                n_chars=n_chars,
+                invert=cfg.get("invert"),
+                dot_kernel=cfg.get("dot_kernel", 0),
+                min_area=cfg.get("min_area", 10),
+                min_char_score=cfg.get("min_char_score", 0.45),
+            )
         measured = text.strip()
         mode = cfg.get("match", "exact")
         expected = cfg.get("expected")
@@ -254,5 +291,9 @@ class FontOcvTool(InspectionTool):
             expected_value=expected_display,
             confidence=score,
             model_version="font-ocv",
-            detail={"match": mode, "char_score": round(score, 3)},
+            detail={
+                "match": mode,
+                "char_score": round(score, 3),
+                "char_scores": [round(v, 2) for v in char_scores],
+            },
         )

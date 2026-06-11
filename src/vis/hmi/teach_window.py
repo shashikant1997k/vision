@@ -28,7 +28,6 @@ from ..runtime import draw_layout, draw_overlay
 from .approve_dialog import ApproveDialog
 from .roi_label import ImageRoiLabel
 from .teach_model import (
-    BATCH_FIELD,
     BATCH_FIELDS,
     FONT_KEYS,
     INSPECTION_TYPES,
@@ -250,7 +249,6 @@ class TeachWindow(QMainWindow):
         side = QVBoxLayout()
         side.addLayout(name_form)
         side.addWidget(palette)
-        self._tree.setMaximumHeight(170)  # keep the properties panel in view
         side.addWidget(self._tree)
         side.addLayout(tree_buttons)
         side.addWidget(self._props_box)
@@ -289,6 +287,17 @@ class TeachWindow(QMainWindow):
         self._set_guide("Click <b>Read Code</b> or <b>Read Text</b>, then drag a box on the image.")
         self._update_img_label()
         self._refresh_view()
+
+    def keyPressEvent(self, event) -> None:
+        if event.key() == Qt.Key_Escape:
+            if self._pending is not None:
+                self._pending = None
+                self._set_guide("Cancelled. Pick an inspection from the palette to add another.")
+            else:
+                self._selected = None
+                self._refresh_view()
+            return
+        super().keyPressEvent(event)
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
@@ -423,7 +432,7 @@ class TeachWindow(QMainWindow):
         self._t_required = QCheckBox("Required (fails the product if this fails)")
         self._t_required.setChecked(True)
         self._t_required.setToolTip("Uncheck to make this inspection informational only.")
-        self._t_required.stateChanged.connect(self._tool_edited)
+        self._t_required.toggled.connect(self._tool_edited)
         self._t_lastread = QLabel("")
         self._t_lastread.setWordWrap(True)
         self._t_lastread.setStyleSheet("color:#225; font-weight:bold")
@@ -432,20 +441,18 @@ class TeachWindow(QMainWindow):
         form.addRow("Type", self._t_type)
         form.addRow("Match", self._t_mode)
         form.addRow("Value", self._t_value)
-        form.addRow("Batch field", self._t_field)
         form.addRow("Rotation", self._t_rotation)
         form.addRow("Search ↔ L/R", self._t_search_x)
         form.addRow("Search ↕ T/B", self._t_search_y)
         form.addRow("Min confidence", self._t_minconf)
-        form.addRow("Engine", self._t_reader)
         form.addRow("Font", self._t_font)
         form.addRow("", self._t_required)
         form.addRow("Last read", self._t_lastread)
         self._tool_form = form
         # rows that only apply to Read (code/text) inspections
         self._match_rows = [
-            self._t_mode, self._t_value, self._t_field,
-            self._t_rotation, self._t_search_x, self._t_search_y, self._t_minconf, self._t_reader, self._t_required,
+            self._t_mode, self._t_value,
+            self._t_rotation, self._t_search_x, self._t_search_y, self._t_minconf, self._t_required,
         ]
         # per-type editor for the general tools (presence/measure/colour/template)
         self._general_form = QFormLayout()
@@ -470,8 +477,7 @@ class TeachWindow(QMainWindow):
             self._tool_form.setRowVisible(widget, visible)
 
     def _sync_tool_inputs(self, mode: str) -> None:
-        self._t_value.setEnabled(mode != BATCH_FIELD)
-        self._t_field.setEnabled(mode == BATCH_FIELD)
+        self._t_value.setEnabled(True)
 
     # ---- general-tool editor (presence / measure / colour / template) -----
     def _build_general_editor(self, tool) -> None:
@@ -734,9 +740,20 @@ class TeachWindow(QMainWindow):
                 parent.addChild(child)
             self._tree.addTopLevelItem(parent)
         self._tree.expandAll()
+        self._resize_tree()
         self._select_in_tree(self._selected)
         self._tree.blockSignals(False)
         self._load_properties()
+
+    def _resize_tree(self) -> None:
+        """Size the inspection plan to its content: 4 rows minimum, growing with
+        each added line, capped so the properties panel stays in view."""
+        rows = 0
+        for r in range(self._tree.topLevelItemCount()):
+            rows += 1 + self._tree.topLevelItem(r).childCount()
+        rows = max(4, min(rows, 12))
+        row_h = max(22, self._tree.fontMetrics().height() + 9)
+        self._tree.setFixedHeight(rows * row_h + 14)
 
     def _select_in_tree(self, role) -> None:
         if role is None:
@@ -803,8 +820,6 @@ class TeachWindow(QMainWindow):
             self._t_value.setPlaceholderText(value_hint(tool.tool_type, info["mode"]))
             rotation_index = self._t_rotation.findData(info["rotation"])
             self._t_rotation.setCurrentIndex(rotation_index if rotation_index >= 0 else 0)
-            field_index = self._t_field.findData(info["field"])
-            self._t_field.setCurrentIndex(field_index if field_index >= 0 else 0)
             self._t_required.setChecked(tool.config.get("required", True))
             self._t_minconf.setValue(int(round((tool.config.get("min_confidence", 0) or 0) * 100)))
             _legacy = int(tool.config.get("search_margin", 0) or 0)
@@ -812,11 +827,8 @@ class TeachWindow(QMainWindow):
             self._t_search_y.setValue(int(tool.config.get("search_y", _legacy) or 0))
             is_font_tool = tool.tool_type == "ocv_font"
             self._tool_form.setRowVisible(self._t_font, is_font_tool)
-            self._tool_form.setRowVisible(self._t_reader, not is_font_tool)
             if is_font_tool:
                 self._load_fonts(tool)
-            else:
-                self._load_engines(tool)
             self._t_lastread.setText(self._last_read_for(region.region_id, tool.tool_id))
             self._sync_tool_inputs(info["mode"])
             self._product_props.hide()
@@ -932,9 +944,6 @@ class TeachWindow(QMainWindow):
             cfg["search_x"] = self._t_search_x.value()
         if self._t_search_y.value() > 0:
             cfg["search_y"] = self._t_search_y.value()
-        engine = self._t_reader.currentData()
-        if engine and engine != "builtin":
-            cfg["reader"] = engine
         if tool.tool_type == "ocv_font":
             for key in FONT_KEYS:  # the trained font must survive match edits
                 if key in (tool.config or {}):
@@ -1039,6 +1048,9 @@ class TeachWindow(QMainWindow):
                         detail = f" — expected {_disp(tr.expected_value)!r}"
                     else:
                         detail = " — not matched"
+                scores = (tr.detail or {}).get("char_scores") or []
+                if scores and not tr.passed:
+                    detail += "  [chars " + " ".join(f"{v:.2f}" for v in scores) + "]"
                 lines.append(f"   {mark} {tr.tool_id}: read “{read}”{detail}")
         lines += self._locator_diagnostics()
         return "\n".join(lines)

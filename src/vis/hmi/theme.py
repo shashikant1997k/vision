@@ -150,6 +150,13 @@ QToolTip {{
     background: {TEXT}; color: white; border: none; padding: 5px 9px;
 }}
 QCheckBox {{ spacing: 7px; }}
+QCheckBox::indicator {{
+    width: 17px; height: 17px;
+    border: 2px solid #9aa3af; border-radius: 5px; background: white;
+}}
+QCheckBox::indicator:hover {{ border-color: {ACCENT}; }}
+QCheckBox::indicator:checked {{ background: {ACCENT}; border-color: {ACCENT}; }}
+QCheckBox::indicator:disabled {{ background: #eef0f4; border-color: #d3d8e0; }}
 QMessageBox, QInputDialog {{ background: {CANVAS}; }}
 """
 

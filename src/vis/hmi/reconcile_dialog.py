@@ -31,6 +31,8 @@ class ReconcileDialog(QDialog):
         self._recovered = self._spin(0)
         self._destroyed = self._spin(0)
         self._reject_bin = self._spin(current.get("rejected", 0))
+        self._target_rate = self._spin(0)
+        self._target_rate.setSuffix(" units/min")
 
         form = QFormLayout()
         form.addRow("Units in (issued)", self._units_in)
@@ -38,6 +40,7 @@ class ReconcileDialog(QDialog):
         form.addRow("Recovered / reworked", self._recovered)
         form.addRow("Destroyed", self._destroyed)
         form.addRow("Reject-bin physical count", self._reject_bin)
+        form.addRow("Target rate (for OEE)", self._target_rate)
 
         self._readout = QLabel()
         self._readout.setWordWrap(True)
@@ -85,6 +88,10 @@ class ReconcileDialog(QDialog):
 
     def _save(self) -> None:
         self._svc.set_figures(self._batch_id, self._user_id, self._current_figures())
+        if self._target_rate.value() > 0:
+            from ..db.oee import OEEService
+
+            OEEService(self._svc._sf).set_target_rate(self._batch_id, self._target_rate.value())
         self.accept()
 
     def reconciliation(self) -> dict:

@@ -118,6 +118,8 @@ class Batch(Base):
     # operator-entered reconciliation figures (units_in, samples_removed,
     # recovered, destroyed, reject_bin_count, tolerance_pct) — see db/reconciliation
     recon_data: Mapped[dict | None] = mapped_column(JSONType, default=dict)
+    # OEE parameters (target_rate_per_min for the ideal cycle time) — see db/oee
+    oee_data: Mapped[dict | None] = mapped_column(JSONType, default=dict)
     status: Mapped[str] = mapped_column(String(16), default="open")
     started_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     started_at: Mapped[str] = mapped_column(String(40), default=_utcnow_iso)
@@ -208,6 +210,24 @@ class AuditEntry(Base):
     signature_id: Mapped[int | None] = mapped_column(ForeignKey("esignatures.id"))
     prev_hash: Mapped[str] = mapped_column(String(64))
     entry_hash: Mapped[str] = mapped_column(String(64))
+
+
+class DowntimeEvent(Base):
+    """A line stop with a classified reason (OEE Six Big Losses). Auto-opened
+    when the line stops running and closed when it resumes; the operator picks
+    the reason. oee_component is which OEE factor the loss hits."""
+
+    __tablename__ = "downtime_events"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    batch_id: Mapped[int | None] = mapped_column(ForeignKey("batches.id"))
+    station: Mapped[str | None] = mapped_column(String(64))
+    reason_code: Mapped[str | None] = mapped_column(String(48))
+    oee_component: Mapped[str] = mapped_column(String(16), default="availability")
+    note: Mapped[str] = mapped_column(Text, default="")
+    started_at: Mapped[str] = mapped_column(String(40), default=_utcnow_iso)
+    ended_at: Mapped[str | None] = mapped_column(String(40))
+    duration_s: Mapped[float | None] = mapped_column(Float)
+    operator_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
 
 
 class DefectLibraryItem(Base):

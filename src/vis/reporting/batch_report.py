@@ -58,9 +58,11 @@ def compute_summary(session, batch_id: int) -> dict:
         for tr in failed_tools:
             defects_by_tool[tr.tool_key] = defects_by_tool.get(tr.tool_key, 0) + 1
 
+    from ..db.oee import compute_oee
     from ..db.reconciliation import compute_reconciliation
 
     return {
+        "oee": compute_oee(session, batch_id),
         "batch_no": batch.batch_no,
         "status": batch.status,
         "product": product.name if product else None,
@@ -192,6 +194,34 @@ def to_html(summary: dict, signature_line: str = "") -> str:
     recon_section = (
         f"<h2>Reconciliation</h2>{recon_verdict}<table>{recon_rows}</table>" if recon else ""
     )
+
+    oee = summary.get("oee") or {}
+    oee_section = ""
+    if oee:
+        def _pct(x):
+            return f"{round(100 * x, 1)}%" if x else "—"
+        oee_rows = kv_table([
+            ("OEE", _pct(oee["oee"])),
+            ("Availability", _pct(oee["availability"])),
+            ("Performance", _pct(oee["performance"])),
+            ("Quality", _pct(oee["quality"])),
+            ("Planned time (s)", oee["planned_s"]),
+            ("Run time (s)", oee["run_s"]),
+            ("Downtime (s)", oee["downtime_s"]),
+            ("Target rate (units/min)", oee["target_rate_per_min"] or "not set"),
+        ])
+        dt = oee.get("downtime_by_reason") or {}
+        dt_rows = "".join(
+            f"<tr><td>{html.escape(k)}</td><td>{v['count']}</td>"
+            f"<td>{round(v['seconds'], 1)}</td><td>{html.escape(v['component'])}</td></tr>"
+            for k, v in dt.items()
+        ) or "<tr><td colspan=4>no downtime recorded</td></tr>"
+        oee_section = (
+            f"<h2>OEE</h2><table>{oee_rows}</table>"
+            f"<h3>Downtime by reason</h3><table>"
+            f"<tr><th>Reason</th><th>Count</th><th>Seconds</th><th>Loss</th></tr>"
+            f"{dt_rows}</table>"
+        )
     return f"""<!doctype html><html><head><meta charset="utf-8">
 <title>Batch Report {html.escape(str(summary['batch_no']))}</title>
 <style>body{{font-family:sans-serif;margin:2rem;color:#222}}table{{border-collapse:collapse;margin:.5rem 0 1.5rem}}
@@ -203,6 +233,7 @@ td,th{{border:1px solid #ccc;padding:4px 12px;text-align:left}}h1{{font-size:1.3
 <h1>Batch Inspection Report &mdash; {html.escape(str(summary['batch_no']))}</h1>
 <table>{overview}</table>
 {recon_section}
+{oee_section}
 <h2>Rejects by lane</h2><table><tr><th>Lane</th><th>Count</th></tr>{count_table(summary['rejects_by_lane'], 'rejects')}</table>
 <h2>Defects by tool (Pareto)</h2><table><tr><th>Tool</th><th>Count</th></tr>{count_table(summary['defects_by_tool'], 'defects')}</table>
 <div class="sig">{html.escape(signature_line) if signature_line else 'Not yet released.'}</div>

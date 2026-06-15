@@ -288,6 +288,7 @@ class MainWindow(QMainWindow):
         self._signals = None
         self._serials = None
         self._duplicate_serials = 0
+        self._downtime_event_id = None  # open when the line is stopped mid-batch
         self.remoteStart.connect(self.start)
         self.remoteStop.connect(self.stop)
         if self._sf is not None:
@@ -349,6 +350,8 @@ class MainWindow(QMainWindow):
         # this recipe must exist within the window, else block start (GMP control)
         if not self._challenge_gate_ok(recipe_db_id):
             return
+        # the line is resuming — classify any open downtime (OEE)
+        self._classify_downtime()
         bus = EventBus()
         batch_no = self._batch_no.text().strip()
         variable_data: dict = {}
@@ -708,7 +711,34 @@ class MainWindow(QMainWindow):
         if self._proto is not None:
             self._proto.push_state(False, None)
         self._log_event("info", "run", "Inspection stopped")
+        # mid-batch stop opens a downtime interval (OEE) — classified on resume
+        if self._batch_id is not None and self._sf is not None and self._downtime_event_id is None:
+            from ..db.oee import OEEService
+
+            self._downtime_event_id = OEEService(self._sf).open_downtime(
+                self._batch_id, station=self._camera_ids[0]
+            )
         self.statusBar().showMessage("Stopped")
+
+    def _classify_downtime(self) -> None:
+        """On resume, ask the operator why the line was down and close the
+        downtime event (OEE Six Big Losses)."""
+        if self._downtime_event_id is None or self._sf is None:
+            return
+        from PySide6.QtWidgets import QInputDialog
+
+        from ..db.oee import REASON_CODES, OEEService
+
+        labels = [f"{code} — {label}" for code, (label, _c) in REASON_CODES.items()]
+        choice, ok = QInputDialog.getItem(
+            self, "Line downtime", "Why was the line stopped?", labels, 0, False
+        )
+        reason = choice.split(" — ")[0] if (ok and choice) else "OTHER"
+        OEEService(self._sf).close_downtime(
+            self._downtime_event_id, reason_code=reason, operator_id=self._user_id
+        )
+        self._log_event("info", "downtime", f"Downtime classified: {reason}")
+        self._downtime_event_id = None
 
     def import_recipe(self) -> None:
         """Import a recipe JSON file as a new draft (re-approval required)."""

@@ -573,6 +573,16 @@ class MainWindow(QMainWindow):
     def close_batch(self) -> None:
         if self._batch_id is None or self._sf is None:
             return
+        from PySide6.QtWidgets import QInputDialog
+
+        from .reconcile_dialog import ReconcileDialog
+
+        # 1. reconciliation entry (units in vs good/reject/samples/...)
+        recon_dialog = ReconcileDialog(self._sf, self._batch_id, self._user_id, self)
+        if recon_dialog.exec() != QDialog.Accepted:
+            return
+
+        # 2. electronic signature
         from .approve_dialog import ApproveDialog
 
         dialog = ApproveDialog(self)
@@ -581,13 +591,30 @@ class MainWindow(QMainWindow):
             return
         from ..db.batches import BatchService
 
-        try:
-            BatchService(self._sf).close(
-                self._batch_id, self._user_id, dialog.password_value, dialog.meaning_value
-            )
-        except Exception as exc:
-            self.statusBar().showMessage(f"Batch release failed: {exc}")
-            return
+        override = None
+        while True:
+            try:
+                BatchService(self._sf).close(
+                    self._batch_id, self._user_id, dialog.password_value,
+                    dialog.meaning_value, override_reason=override,
+                )
+                break
+            except ValueError as exc:
+                if "does not reconcile" not in str(exc) or override is not None:
+                    self.statusBar().showMessage(f"Batch release failed: {exc}")
+                    return
+                # batch doesn't reconcile — require a deviation reason to override
+                reason, ok = QInputDialog.getText(
+                    self, "Batch does not reconcile",
+                    f"{exc}\n\nEnter a deviation reason to release anyway:")
+                if not ok or not reason.strip():
+                    self.statusBar().showMessage("Batch release cancelled (did not reconcile).")
+                    return
+                override = reason.strip()
+                self._log_event("warn", "batch", f"Reconciliation override: {override}")
+            except Exception as exc:
+                self.statusBar().showMessage(f"Batch release failed: {exc}")
+                return
 
         from ..reporting.batch_report import write_batch_report
 

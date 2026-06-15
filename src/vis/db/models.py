@@ -115,6 +115,9 @@ class Batch(Base):
     exp_date: Mapped[str | None] = mapped_column(String(16))
     mrp: Mapped[str | None] = mapped_column(String(32))
     variable_data: Mapped[dict | None] = mapped_column(JSONType, default=dict)
+    # operator-entered reconciliation figures (units_in, samples_removed,
+    # recovered, destroyed, reject_bin_count, tolerance_pct) — see db/reconciliation
+    recon_data: Mapped[dict | None] = mapped_column(JSONType, default=dict)
     status: Mapped[str] = mapped_column(String(16), default="open")
     started_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     started_at: Mapped[str] = mapped_column(String(40), default=_utcnow_iso)

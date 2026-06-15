@@ -96,10 +96,19 @@ class BatchService:
             return batch.id
 
     def close(
-        self, batch_id: int, user_id: int, password: str, meaning: str = "Batch released"
+        self, batch_id: int, user_id: int, password: str, meaning: str = "Batch released",
+        override_reason: str | None = None,
     ) -> int:
         """Close (release) a batch. Requires batch.manage AND password re-entry
-        (two-component e-signature). Returns the signature id."""
+        (two-component e-signature). Returns the signature id.
+
+        If reconciliation figures have been entered and the batch does NOT
+        reconcile (out of tolerance, or duplicate serials present), the close is
+        blocked unless `override_reason` is supplied — which is recorded as a
+        deviation in the audit trail (you cannot silently release a batch that
+        doesn't account for its units)."""
+        from .reconciliation import compute_reconciliation
+
         with self._sf() as s:
             require(s, user_id, Perm.BATCH_MANAGE)
             if not verify_user(s, user_id, password):
@@ -110,6 +119,22 @@ class BatchService:
             if batch.status == "closed":
                 raise ValueError("batch already closed")
 
+            # reconciliation gate (only when figures were entered)
+            recon = compute_reconciliation(s, batch_id)
+            if recon["units_in"] and not recon["reconciled"] and not override_reason:
+                problems = []
+                if recon["within_tolerance"] is False:
+                    problems.append(
+                        f"reconciliation {recon['reconciliation_pct']}% outside "
+                        f"±{recon['tolerance_pct']}% (unaccounted {recon['unaccounted']})"
+                    )
+                if recon["duplicate_serials"]:
+                    problems.append(f"{len(recon['duplicate_serials'])} duplicate serial(s)")
+                raise ValueError(
+                    "batch does not reconcile: " + "; ".join(problems)
+                    + " — investigate, or close with an override reason (deviation)."
+                )
+
             signature = ESignature(
                 user_id=user_id, meaning=meaning, entity_type="batch", entity_id=str(batch_id)
             )
@@ -117,13 +142,16 @@ class BatchService:
             s.flush()
             batch.status = "closed"
             batch.closed_at = _now()
+            after = {"status": "closed"}
+            if override_reason:
+                after["override_reason"] = override_reason  # recorded deviation
             AuditService(s).record(
                 "batch.close",
                 "batch",
                 batch_id,
                 user_id=user_id,
                 before={"status": "open"},
-                after={"status": "closed"},
+                after=after,
                 signature_id=signature.id,
             )
             s.commit()

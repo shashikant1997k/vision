@@ -58,6 +58,8 @@ def compute_summary(session, batch_id: int) -> dict:
         for tr in failed_tools:
             defects_by_tool[tr.tool_key] = defects_by_tool.get(tr.tool_key, 0) + 1
 
+    from ..db.reconciliation import compute_reconciliation
+
     return {
         "batch_no": batch.batch_no,
         "status": batch.status,
@@ -74,6 +76,7 @@ def compute_summary(session, batch_id: int) -> dict:
         "pass_rate": round(100 * passed / total, 2) if total else 0.0,
         "rejects_by_lane": rejects_by_lane,
         "defects_by_tool": dict(sorted(defects_by_tool.items(), key=lambda kv: -kv[1])),
+        "reconciliation": compute_reconciliation(session, batch_id),
     }
 
 
@@ -158,15 +161,48 @@ def to_html(summary: dict, signature_line: str = "") -> str:
             ("Pass rate %", summary["pass_rate"]),
         ]
     )
+    recon = summary.get("reconciliation") or {}
+    recon_rows = kv_table(
+        [
+            ("Units in (issued)", recon.get("units_in")),
+            ("Good accepted", recon.get("good")),
+            ("Rejected", recon.get("rejected")),
+            ("Samples removed", recon.get("samples_removed")),
+            ("Recovered / reworked", recon.get("recovered")),
+            ("Destroyed", recon.get("destroyed")),
+            ("Accounted", recon.get("accounted")),
+            ("Unaccounted", recon.get("unaccounted")),
+            ("Yield %", recon.get("yield_pct")),
+            ("Reconciliation %", recon.get("reconciliation_pct")),
+            ("Within tolerance", recon.get("within_tolerance")),
+            ("Reject-bin count", recon.get("reject_bin_count")),
+            ("Reject-bin delta", recon.get("reject_bin_delta")),
+            ("Unique serials", recon.get("unique_serials")),
+            ("Duplicate serials", len(recon.get("duplicate_serials") or [])),
+        ]
+    ) if recon else ""
+    recon_verdict = ""
+    if recon:
+        ok = recon.get("reconciled")
+        if recon.get("units_in"):
+            recon_verdict = (
+                f"<p class='{'ok' if ok else 'bad'}'>Batch "
+                f"{'RECONCILES' if ok else 'DOES NOT reconcile'}.</p>"
+            )
+    recon_section = (
+        f"<h2>Reconciliation</h2>{recon_verdict}<table>{recon_rows}</table>" if recon else ""
+    )
     return f"""<!doctype html><html><head><meta charset="utf-8">
 <title>Batch Report {html.escape(str(summary['batch_no']))}</title>
 <style>body{{font-family:sans-serif;margin:2rem;color:#222}}table{{border-collapse:collapse;margin:.5rem 0 1.5rem}}
 td,th{{border:1px solid #ccc;padding:4px 12px;text-align:left}}h1{{font-size:1.3rem}}
 .sig{{margin-top:2rem;padding:1rem;border:1px solid #444;background:#fafafa}}
+.ok{{color:#1a7f37;font-weight:bold}}.bad{{color:#c22;font-weight:bold}}
 .note{{color:#888;font-size:.8rem;margin-top:1rem}}</style></head>
 <body>
 <h1>Batch Inspection Report &mdash; {html.escape(str(summary['batch_no']))}</h1>
 <table>{overview}</table>
+{recon_section}
 <h2>Rejects by lane</h2><table><tr><th>Lane</th><th>Count</th></tr>{count_table(summary['rejects_by_lane'], 'rejects')}</table>
 <h2>Defects by tool (Pareto)</h2><table><tr><th>Tool</th><th>Count</th></tr>{count_table(summary['defects_by_tool'], 'defects')}</table>
 <div class="sig">{html.escape(signature_line) if signature_line else 'Not yet released.'}</div>

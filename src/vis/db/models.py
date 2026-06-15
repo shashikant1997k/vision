@@ -207,6 +207,25 @@ class AuditEntry(Base):
     entry_hash: Mapped[str] = mapped_column(String(64))
 
 
+class SerialRecord(Base):
+    """A unique serial seen within a batch (pharma serialization). The unique
+    (batch_id, serial) constraint is the anti-duplicate control: a second sight
+    of the same serial in a batch is a duplicate (printer double-fire, reprint,
+    or counterfeit re-injection). status drives batch-close reconciliation."""
+
+    __tablename__ = "serial_records"
+    __table_args__ = (UniqueConstraint("batch_id", "serial"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    batch_id: Mapped[int | None] = mapped_column(ForeignKey("batches.id"))
+    serial: Mapped[str] = mapped_column(String(64))
+    gtin: Mapped[str | None] = mapped_column(String(32))
+    status: Mapped[str] = mapped_column(String(16), default="good")  # good/rejected/duplicate
+    camera_id: Mapped[str | None] = mapped_column(String(64))
+    first_frame: Mapped[int | None] = mapped_column(Integer)
+    seen_count: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[str] = mapped_column(String(40), default=_utcnow_iso)
+
+
 class SettingRow(Base):
     """Application key/value settings (JSON values) — e.g. comms config."""
 

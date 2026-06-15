@@ -281,6 +281,8 @@ class MainWindow(QMainWindow):
         self._events = None
         self._proto = None
         self._signals = None
+        self._serials = None
+        self._duplicate_serials = 0
         self.remoteStart.connect(self.start)
         self.remoteStop.connect(self.stop)
         if self._sf is not None:
@@ -371,6 +373,11 @@ class MainWindow(QMainWindow):
                 bus.subscribe("inspection.result", ResultStore(self._sf, batch_id=self._batch_id).on_result)
                 self._close_batch.setEnabled(True)
                 self._log_event("info", "batch", f"Batch {batch_no} started")
+                # serial uniqueness / duplicate detection for this batch
+                from ..db.serials import SerialRegistry
+
+                self._serials = SerialRegistry(self._sf, self._batch_id)
+                bus.subscribe("inspection.result", self._on_serial)
 
         # build one assignment per camera, each with its own selected recipe
         # (the primary recipe drives the batch; batch values apply to all cameras)
@@ -427,6 +434,35 @@ class MainWindow(QMainWindow):
             )
 
     # ---- third-party integration (TCP + 24V) -----------------------------
+    def _on_serial(self, region_result) -> None:
+        """Register each read serial for uniqueness; a duplicate within the
+        batch is a data-integrity event (and a quality reject)."""
+        registry = getattr(self, "_serials", None)
+        if registry is None:
+            return
+        for tr in region_result.tool_results:
+            fields = (tr.detail or {}).get("fields") or {}
+            serial = fields.get("serial")
+            if not serial:
+                continue
+            outcome = registry.check_and_register(
+                serial, gtin=fields.get("gtin"),
+                camera_id=region_result.camera_id, frame_id=region_result.frame_id,
+            )
+            if outcome.status.value == "duplicate":
+                self._duplicate_serials += 1
+                message = (
+                    f"Duplicate serial {serial!r} (seen {outcome.seen_count}× in this "
+                    "batch) on " + region_result.camera_id
+                )
+                self._log_event("alarm", "serial", message)
+                if self._proto is not None:
+                    self._proto.push_alarm("DUPLICATE_SERIAL", message)
+            elif region_result.passed:
+                registry.mark_status(serial, "good")
+            else:
+                registry.mark_status(serial, "rejected")
+
     def _log_event(self, severity: str, source: str, message: str) -> None:
         if self._events is not None:
             try:

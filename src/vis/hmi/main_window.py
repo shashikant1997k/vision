@@ -48,6 +48,7 @@ class MainWindow(QMainWindow):
         report_dir="reports",
         simulation=False,
         alarm_consecutive_rejects=5,
+        require_challenge_hours=0,
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -62,6 +63,7 @@ class MainWindow(QMainWindow):
         self._report_dir = report_dir
         self._simulation = simulation
         self._alarm_threshold = alarm_consecutive_rejects
+        self._require_challenge_hours = require_challenge_hours
         # the operator's permissions decide which controls are even shown
         self._perms = None
         if session_factory is not None and user_id is not None:
@@ -148,6 +150,7 @@ class MainWindow(QMainWindow):
         self._review = QPushButton("Review rejects…")
         self._import = QPushButton("Import recipe…")
         self._fonts = QPushButton("Fonts…")
+        self._challenge = QPushButton("Challenge test…")
         self._events_btn = QPushButton("Events…")
         self._comms = QPushButton("Comms…")
         self._stations = QPushButton("Stations…")
@@ -162,6 +165,7 @@ class MainWindow(QMainWindow):
         self._review.clicked.connect(self.open_review)
         self._import.clicked.connect(self.import_recipe)
         self._fonts.clicked.connect(self.open_fonts)
+        self._challenge.clicked.connect(self.open_challenge)
         self._events_btn.clicked.connect(self.open_events)
         self._comms.clicked.connect(self.open_comms)
         self._stations.clicked.connect(self.open_stations)
@@ -204,6 +208,7 @@ class MainWindow(QMainWindow):
         run_row = QHBoxLayout()
         run_row.addWidget(self._start, 1)
         run_row.addWidget(self._stop, 1)
+        run_row.addWidget(self._challenge, 1)
         run_row.addWidget(self._review, 1)
         run_row.addWidget(self._events_btn, 1)
         buttons.addLayout(run_row)
@@ -340,6 +345,10 @@ class MainWindow(QMainWindow):
         if self._runner is not None:
             return
         self._recipe, recipe_db_id = self._resolve_recipe()
+        # challenge-test line-start gate: if enabled, a passing challenge test for
+        # this recipe must exist within the window, else block start (GMP control)
+        if not self._challenge_gate_ok(recipe_db_id):
+            return
         bus = EventBus()
         batch_no = self._batch_no.text().strip()
         variable_data: dict = {}
@@ -434,6 +443,62 @@ class MainWindow(QMainWindow):
             )
 
     # ---- third-party integration (TCP + 24V) -----------------------------
+    def open_challenge(self) -> None:
+        """Run a challenge test (known-bad sample verification)."""
+        if self._sf is None:
+            self.statusBar().showMessage("No database — challenge test unavailable.")
+            return
+        from .challenge_window import ChallengeDialog
+
+        _, recipe_db_id = self._resolve_recipe()
+        dialog = ChallengeDialog(
+            self._sf, self._user_id, recipe_id=recipe_db_id,
+            batch_id=self._batch_id, station=self._camera_ids[0], parent=self,
+        )
+        dialog.resize(620, 380)
+        dialog.exec()
+        if dialog.result is not None:
+            outcome = dialog.result["result"].upper()
+            self._log_event(
+                "alarm" if outcome == "FAIL" else "info", "challenge",
+                f"Challenge test {outcome} (#{dialog.result['id']})",
+            )
+            self.statusBar().showMessage(f"Challenge test {outcome}.")
+
+    def _challenge_gate_ok(self, recipe_db_id) -> bool:
+        """True if production may start. When the challenge gate is enabled, a
+        passing challenge test for this recipe must exist within the window."""
+        if self._sf is None or not self._require_challenge_hours:
+            return True
+        from .challenge_window import ChallengeDialog
+        from ..db.challenge import ChallengeService
+
+        gate = ChallengeService(self._sf).latest_pass(
+            recipe_id=recipe_db_id, within_hours=self._require_challenge_hours
+        )
+        if gate is not None:
+            return True
+        # no valid challenge test — offer to run one now
+        from PySide6.QtWidgets import QMessageBox
+
+        answer = QMessageBox.question(
+            self, "Challenge test required",
+            "No passing challenge test for this recipe within "
+            f"{self._require_challenge_hours} h. Run one now?",
+        )
+        if answer != QMessageBox.Yes:
+            self.statusBar().showMessage("Start blocked: a passing challenge test is required.")
+            return False
+        dialog = ChallengeDialog(
+            self._sf, self._user_id, recipe_id=recipe_db_id,
+            station=self._camera_ids[0], parent=self,
+        )
+        dialog.resize(620, 380)
+        passed = dialog.exec() == QDialog.Accepted and dialog.result and dialog.result["result"] == "pass"
+        if not passed:
+            self.statusBar().showMessage("Start blocked: challenge test did not pass.")
+        return bool(passed)
+
     def _on_serial(self, region_result) -> None:
         """Register each read serial for uniqueness; a duplicate within the
         batch is a data-integrity event (and a quality reject)."""

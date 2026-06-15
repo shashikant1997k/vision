@@ -210,6 +210,63 @@ class AuditEntry(Base):
     entry_hash: Mapped[str] = mapped_column(String(64))
 
 
+class DefectLibraryItem(Base):
+    """A catalogued known-defect sample used for challenge tests (e.g. wrong
+    GTIN, expired date, no code, low-grade print). expected_verdict is what the
+    system must return when this sample is presented (normally 'reject')."""
+
+    __tablename__ = "defect_library"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str] = mapped_column(String(48), unique=True)
+    defect_class: Mapped[str] = mapped_column(String(48), default="")
+    description: Mapped[str] = mapped_column(Text, default="")
+    expected_verdict: Mapped[str] = mapped_column(String(8), default="reject")  # reject/pass
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[str] = mapped_column(String(40), default=_utcnow_iso)
+
+
+class ChallengeTest(Base):
+    """A challenge (known-bad sample) verification test: prove the system detects
+    and physically rejects seeded defects, recorded with an operator e-signature
+    and gating the line. trigger_reason ∈ line_start/batch_start/shift_start/
+    shift_end/after_break/after_changeover/after_maintenance/periodic."""
+
+    __tablename__ = "challenge_tests"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    trigger_reason: Mapped[str] = mapped_column(String(24), default="line_start")
+    batch_id: Mapped[int | None] = mapped_column(ForeignKey("batches.id"))
+    recipe_id: Mapped[int | None] = mapped_column(ForeignKey("recipes.id"))
+    recipe_version: Mapped[int | None] = mapped_column(Integer)
+    station: Mapped[str | None] = mapped_column(String(64))
+    result: Mapped[str] = mapped_column(String(8), default="pending")  # pass/fail/pending
+    line_gate_action: Mapped[str | None] = mapped_column(String(16))  # unlocked/blocked
+    operator_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    supervisor_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    signature_id: Mapped[int | None] = mapped_column(ForeignKey("esignatures.id"))
+    started_at: Mapped[str] = mapped_column(String(40), default=_utcnow_iso)
+    completed_at: Mapped[str | None] = mapped_column(String(40))
+    shots: Mapped[list["ChallengeShot"]] = relationship(
+        cascade="all, delete-orphan", back_populates="test"
+    )
+
+
+class ChallengeShot(Base):
+    """One presented sample within a challenge test: the expected vs actual
+    verdict and whether the 24V reject actuator physically confirmed."""
+
+    __tablename__ = "challenge_shots"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    test_id: Mapped[int] = mapped_column(ForeignKey("challenge_tests.id"))
+    defect_item_id: Mapped[int | None] = mapped_column(ForeignKey("defect_library.id"))
+    label: Mapped[str] = mapped_column(String(96), default="")
+    expected_verdict: Mapped[str] = mapped_column(String(8), default="reject")
+    actual_verdict: Mapped[str] = mapped_column(String(8), default="")
+    reject_io_confirmed: Mapped[bool] = mapped_column(Boolean, default=False)
+    passed: Mapped[bool] = mapped_column(Boolean, default=False)
+    detail: Mapped[dict | None] = mapped_column(JSONType, default=dict)
+    test: Mapped[ChallengeTest] = relationship(back_populates="shots")
+
+
 class SerialRecord(Base):
     """A unique serial seen within a batch (pharma serialization). The unique
     (batch_id, serial) constraint is the anti-duplicate control: a second sight

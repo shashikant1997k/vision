@@ -291,6 +291,7 @@ class MainWindow(QMainWindow):
         self._downtime_event_id = None  # open when the line is stopped mid-batch
         self.remoteStart.connect(self.start)
         self.remoteStop.connect(self.stop)
+        self._time_monitor = None
         if self._sf is not None:
             from ..db.app_settings import EventService
 
@@ -301,6 +302,17 @@ class MainWindow(QMainWindow):
                 self._apply_comms(load_comms_config(self._sf))
             except Exception:
                 pass  # comms must never block the HMI from opening
+            # trusted-time monitor: detect + record clock tampering (ALCOA+)
+            try:
+                from ..common.trusted_time import TimeMonitor, record_time_anomaly
+
+                config = load_comms_config(self._sf)
+                self._time_monitor = TimeMonitor(
+                    lambda a: record_time_anomaly(self._sf, a, config.get("ntp_server")),
+                    ntp_server=config.get("ntp_server") or None,
+                ).start()
+            except Exception:
+                pass
 
     def _reload_recipes(self) -> None:
         """Repopulate every camera's recipe selector from the DB (demo + approved)."""
@@ -628,6 +640,8 @@ class MainWindow(QMainWindow):
             self._signals.close()
         if self._proto is not None:
             self._proto.stop()
+        if self._time_monitor is not None:
+            self._time_monitor.stop()
         super().closeEvent(event)
 
     def _can(self, perm: str) -> bool:

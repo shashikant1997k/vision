@@ -26,6 +26,7 @@ DEFAULTS = {
     "io_backend": "simulated",  # simulated | modbus
     "io_host": "",
     "io_port": 502,
+    "ntp_server": "",
     "signals": SignalMap().to_dict(),
 }
 
@@ -61,10 +62,13 @@ class CommsWindow(QMainWindow):
         self._tcp_port.setValue(int(config["tcp_port"]))
         self._remote_start = QCheckBox("Allow third-party apps to start/stop the line")
         self._remote_start.setChecked(bool(config["allow_remote_start"]))
+        self._ntp_server = QLineEdit(config.get("ntp_server", ""))
+        self._ntp_server.setPlaceholderText("NTP server for trusted-time drift check (optional)")
         tcp_form = QFormLayout()
         tcp_form.addRow(self._tcp_enabled)
         tcp_form.addRow("Port", self._tcp_port)
         tcp_form.addRow(self._remote_start)
+        tcp_form.addRow("NTP server", self._ntp_server)
         tcp_box = QGroupBox("TCP/IP (results, counters, commands)")
         tcp_box.setLayout(tcp_form)
 
@@ -128,6 +132,7 @@ class CommsWindow(QMainWindow):
             "io_backend": self._io_backend.currentData(),
             "io_host": self._io_host.text().strip(),
             "io_port": self._io_port.value(),
+            "ntp_server": self._ntp_server.text().strip(),
             "signals": signals,
         }
 

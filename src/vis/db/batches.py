@@ -119,6 +119,21 @@ class BatchService:
             if batch.status == "closed":
                 raise ValueError("batch already closed")
 
+            # audit-trail review gate: a batch with UNREVIEWED CRITICAL audit
+            # anomalies (time change, reconciliation override, failed challenge,
+            # record void) cannot be released until reviewed + signed off (PIC/S
+            # PI 041 "critical audit trails reviewed prior to batch release").
+            from .audit_review import AuditReviewService
+
+            critical = AuditReviewService(self._sf).unreviewed_critical(batch_id)
+            if critical and not override_reason:
+                codes = ", ".join(sorted({c["code"] for c in critical}))
+                raise ValueError(
+                    f"audit trail has {len(critical)} unreviewed critical anomaly(ies) "
+                    f"[{codes}] — perform an audit-trail review before release, or "
+                    "close with an override reason (deviation)."
+                )
+
             # reconciliation gate (only when figures were entered)
             recon = compute_reconciliation(s, batch_id)
             if recon["units_in"] and not recon["reconciled"] and not override_reason:

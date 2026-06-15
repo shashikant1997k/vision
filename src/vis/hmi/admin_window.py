@@ -276,9 +276,19 @@ class AdminWindow(QMainWindow):
         self._audit_table = self._table(["ID", "Time", "User", "Action", "Entity", "Signed"])
         verify = QPushButton("Verify chain")
         verify.clicked.connect(self._verify_chain)
+        review = QPushButton("Review audit trail…")
+        review.setProperty("variant", "primary")
+        review.clicked.connect(self._open_audit_review)
         refresh = QPushButton("Refresh")
         refresh.clicked.connect(self._refresh_audit)
-        return self._tab_widget(self._audit_table, [verify, refresh])
+        return self._tab_widget(self._audit_table, [verify, review, refresh])
+
+    def _open_audit_review(self):
+        from .audit_review_window import AuditReviewWindow
+
+        self._review_window = AuditReviewWindow(self._sf, self._uid, parent=self)
+        self._review_window.resize(820, 460)
+        self._review_window.show()
 
     def _refresh_audit(self):
         if self._audit_table is None:

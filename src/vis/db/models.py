@@ -306,6 +306,30 @@ class SerialRecord(Base):
     created_at: Mapped[str] = mapped_column(String(40), default=_utcnow_iso)
 
 
+class AuditReview(Base):
+    """A review-by-exception of the audit trail (21 CFR 11 / Annex 11 / PIC-S
+    PI 041): a qualified reviewer signs off the audit entries for a batch/window
+    before disposition. Itself an attributable, e-signed record. The watermark
+    (reviewed_to_id = last audit-entry id covered) makes the next review
+    incremental. chain_verified records verify_chain() over the window."""
+
+    __tablename__ = "audit_reviews"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    batch_id: Mapped[int | None] = mapped_column(ForeignKey("batches.id"))
+    scope: Mapped[str] = mapped_column(String(16), default="batch")  # batch/period
+    reviewed_from_id: Mapped[int] = mapped_column(Integer, default=0)
+    reviewed_to_id: Mapped[int] = mapped_column(Integer, default=0)
+    entries_total: Mapped[int] = mapped_column(Integer, default=0)
+    entries_flagged: Mapped[int] = mapped_column(Integer, default=0)
+    chain_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    flags: Mapped[list | None] = mapped_column(JSONType, default=list)
+    outcome: Mapped[str] = mapped_column(String(24), default="accepted")
+    reviewer_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    signature_id: Mapped[int | None] = mapped_column(ForeignKey("esignatures.id"))
+    ruleset_version: Mapped[str] = mapped_column(String(16), default="v1")
+    created_at: Mapped[str] = mapped_column(String(40), default=_utcnow_iso)
+
+
 class SettingRow(Base):
     """Application key/value settings (JSON values) — e.g. comms config."""
 

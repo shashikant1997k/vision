@@ -288,6 +288,7 @@ class MainWindow(QMainWindow):
         self._signals = None
         self._serials = None
         self._duplicate_serials = 0
+        self._web = None
         self._downtime_event_id = None  # open when the line is stopped mid-batch
         self.remoteStart.connect(self.start)
         self.remoteStop.connect(self.stop)
@@ -558,6 +559,9 @@ class MainWindow(QMainWindow):
         if self._signals is not None:
             self._signals.close()
             self._signals = None
+        if getattr(self, "_web", None) is not None:
+            self._web.stop()
+            self._web = None
 
         signal_map = None
         if config and any((config.get("signals") or {}).get(k) for k in
@@ -588,6 +592,15 @@ class MainWindow(QMainWindow):
             self._proto = VisProtocolServer(port=int(config.get("tcp_port", 9410)),
                                             callbacks=callbacks).start()
 
+        if config and config.get("web_enabled"):
+            from ..integrations.web_api import ReadOnlyApiServer
+
+            self._web = ReadOnlyApiServer(
+                self._sf, port=int(config.get("web_port", 9480)),
+                token=config.get("web_token", ""),
+                status_provider=self._proto_status, counters_provider=self._proto_counters,
+            ).start()
+
     def _proto_status(self) -> dict:
         return {
             "running": self._runner is not None,
@@ -608,10 +621,15 @@ class MainWindow(QMainWindow):
         ]
 
     def comms_status(self) -> str:
-        if self._proto is None:
-            return "Integration server: disabled."
-        return (f"Integration server: listening on port {self._proto.port}, "
-                f"{self._proto.client_count()} client(s) connected.")
+        lines = []
+        if self._proto is not None:
+            lines.append(
+                f"TCP server: listening on {self._proto.port}, "
+                f"{self._proto.client_count()} client(s)."
+            )
+        if self._web is not None:
+            lines.append(f"Web dashboard: http://<host>:{self._web.port}/")
+        return " ".join(lines) if lines else "Integration servers: disabled."
 
     def open_events(self) -> None:
         if self._sf is None:
@@ -642,6 +660,8 @@ class MainWindow(QMainWindow):
             self._proto.stop()
         if self._time_monitor is not None:
             self._time_monitor.stop()
+        if self._web is not None:
+            self._web.stop()
         super().closeEvent(event)
 
     def _can(self, perm: str) -> bool:

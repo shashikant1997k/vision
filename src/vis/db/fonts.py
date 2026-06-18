@@ -37,6 +37,29 @@ class FontRepository:
                 )
             s.commit()
 
+    def seed_trained_font(
+        self, name: str, print_type: str, glyphs: dict, dot_kernel: int = 0, replace: bool = True
+    ) -> int:
+        """Install a pre-trained glyph font (e.g. trained from line images) into
+        the library. Idempotent; with replace=True an existing same-named font's
+        glyphs are refreshed. Returns the font id."""
+        with self._sf() as s:
+            row = s.execute(
+                select(FontModelRow).where(FontModelRow.name == name)
+            ).scalars().first()
+            if row is None:
+                row = FontModelRow(name=name, print_type=print_type, dot_kernel=dot_kernel,
+                                   glyphs=glyphs, builtin=True)
+                s.add(row)
+            elif replace:
+                row.glyphs = glyphs
+                row.print_type = print_type
+                row.dot_kernel = dot_kernel
+            s.flush()
+            fid = row.id
+            s.commit()
+            return fid
+
     def list_fonts(self) -> list[dict]:
         with self._sf() as s:
             out = []

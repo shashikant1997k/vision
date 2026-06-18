@@ -139,12 +139,44 @@ def _ncc(a, b) -> float:
 
 
 # ---- font registration + reading -----------------------------------------
+def _segment_to_count(binary, n, min_area=6):
+    """Segment into exactly n character boxes for PROPORTIONAL print (near-solid
+    inkjet/laser), where equal-width slicing misaligns. Uses connected components
+    (true ink extents), then reconciles to n: merge the closest-spaced adjacent
+    components when there are too many (broken strokes, punctuation specks,
+    dot-matrix), split the widest when too few (touching characters). Falls back
+    to gap/even split if components can't be found."""
+    boxes = _char_boxes(binary, min_area)
+    if not boxes or n <= 0:
+        return _even_split(binary, n)
+    if len(boxes) == 1 and n > 1:
+        return _even_split(binary, n)  # one blob, no gaps -> equal slices
+
+    # too many components: merge the adjacent pair with the smallest x-gap
+    while len(boxes) > n:
+        gaps = [(boxes[i + 1][0] - (boxes[i][0] + boxes[i][2]), i) for i in range(len(boxes) - 1)]
+        _, i = min(gaps)
+        a, b = boxes[i], boxes[i + 1]
+        nx, ny = min(a[0], b[0]), min(a[1], b[1])
+        nx2, ny2 = max(a[0] + a[2], b[0] + b[2]), max(a[1] + a[3], b[1] + b[3])
+        boxes[i:i + 2] = [(nx, ny, nx2 - nx, ny2 - ny)]
+
+    # too few components: split the widest box into equal vertical slices
+    while len(boxes) < n:
+        widest = max(range(len(boxes)), key=lambda i: boxes[i][2])
+        x, y, w, hh = boxes[widest]
+        half = max(1, w // 2)
+        boxes[widest:widest + 1] = [(x, y, half, hh), (x + half, y, w - half, hh)]
+        boxes.sort(key=lambda b: b[0])
+    return boxes
+
+
 def _split_boxes(binary, n_chars, min_area):
-    """Character boxes. With a known count (verification) split the foreground
-    bounding-box into n equal slices (coder fonts are monospace — far more robust
-    than guessing boundaries). Otherwise fall back to connected components."""
+    """Character boxes. With a known count, segment proportionally (handles both
+    monospace coder fonts and proportional near-solid print). Otherwise fall back
+    to connected components."""
     if n_chars and n_chars > 0:
-        return _even_split(binary, n_chars)
+        return _segment_to_count(binary, n_chars, min_area)
     return _char_boxes(binary, min_area)
 
 
@@ -154,7 +186,9 @@ def register_font(image, text, font=None, invert=None, dot_kernel=0, min_area=10
     font = {k: list(v) for k, v in (font or {}).items()}
     binary = _prepare_binary(_gray(image), invert, dot_kernel)
     chars = [c for c in text if not c.isspace()]
-    boxes = _even_split(binary, len(chars))  # text is known -> split by count
+    boxes = _segment_to_count(binary, len(chars))  # known text -> proportional split
+    if len(boxes) != len(chars):
+        return font  # ambiguous segmentation — skip rather than learn bad glyphs
     for ch, box in zip(chars, boxes):
         font.setdefault(ch, []).append(_encode(_norm_glyph(binary, box)))
     return font
@@ -243,7 +277,7 @@ def verify_text(image, font, expected, invert=None, dot_kernel=0, min_char_score
     if not chars or not font:
         return "", 0.0, []
     binary = _prepare_binary(_gray(image), invert, dot_kernel)
-    boxes = _even_split(binary, len(chars))
+    boxes = _segment_to_count(binary, len(chars))
     if len(boxes) != len(chars):
         return "", 0.0, [0.0] * len(chars)
     templates = {ch: [_decode(t) for t in tpls] for ch, tpls in font.items()}

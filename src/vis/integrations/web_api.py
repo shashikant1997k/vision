@@ -24,6 +24,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from ..common.trusted_time import now_iso
+from .web_dashboard import DASHBOARD_HTML
 
 
 def _make_handler(server_ref):
@@ -125,8 +126,12 @@ class ReadOnlyApiServer:
             return self._status()
         if parts == ["api", "counters"]:
             return self._counters()
+        if parts == ["api", "overview"]:
+            return self._overview()
         if parts == ["api", "batches"]:
             return {"batches": self._batches()}
+        if parts == ["api", "challenges"]:
+            return {"challenges": self._challenges()}
         if parts == ["api", "events"]:
             return {"events": self._events()}
         if parts == ["api", "audit"]:
@@ -140,6 +145,8 @@ class ReadOnlyApiServer:
                 return self._oee(bid)
             if parts[1] == "reconciliation":
                 return self._reconciliation(bid)
+            if parts[1] == "analytics":
+                return self._analytics(bid)
         raise KeyError(path)
 
     # ---- data (read-only) -------------------------------------------------
@@ -178,6 +185,66 @@ class ReadOnlyApiServer:
 
         return ReconciliationService(self._sf).compute(batch_id)
 
+    def _challenges(self) -> list:
+        if self._sf is None:
+            return []
+        from ..db.challenge import ChallengeService
+
+        return ChallengeService(self._sf).list_tests(limit=50)
+
+    def _latest_batch_id(self):
+        batches = self._batches()
+        return batches[0]["id"] if batches else None
+
+    def _overview(self) -> dict:
+        """One bundled call for the landing view (fewer round-trips)."""
+        out = {"status": self._status(), "counters": self._counters(),
+               "latest_batch": None, "oee": None, "analytics": None}
+        bid = self._latest_batch_id()
+        if bid is not None:
+            batches = self._batches()
+            out["latest_batch"] = batches[0]
+            try:
+                out["oee"] = self._oee(bid)
+            except Exception:
+                pass
+            try:
+                out["analytics"] = self._analytics(bid)
+            except Exception:
+                pass
+        return out
+
+    def _analytics(self, batch_id: int) -> dict:
+        """Defect Pareto + per-camera/lane breakdown for a batch (for charts)."""
+        from sqlalchemy import func, select
+
+        from ..db.models import InspectionResult
+        from ..reporting.batch_report import compute_summary
+
+        with self._sf() as s:
+            summary = compute_summary(s, batch_id)
+            per_camera = []
+            rows = s.execute(
+                select(
+                    InspectionResult.camera_id,
+                    func.count().label("total"),
+                    func.sum(func.cast(InspectionResult.passed, __import__("sqlalchemy").Integer)),
+                ).where(InspectionResult.batch_id == batch_id)
+                .group_by(InspectionResult.camera_id)
+            ).all()
+            for cam, total, passed in rows:
+                passed = int(passed or 0)
+                per_camera.append({"camera": cam, "total": int(total),
+                                   "passed": passed, "failed": int(total) - passed})
+        return {
+            "batch_no": summary["batch_no"],
+            "total": summary["total"], "passed": summary["passed"], "failed": summary["failed"],
+            "defects_by_tool": summary["defects_by_tool"],
+            "rejects_by_lane": summary["rejects_by_lane"],
+            "per_camera": per_camera,
+            "reconciliation": summary.get("reconciliation"),
+        }
+
     def _events(self) -> list:
         if self._sf is None:
             return []
@@ -194,58 +261,3 @@ class ReadOnlyApiServer:
             return AuditService(s).list_entries(limit=100)
 
 
-DASHBOARD_HTML = """<!doctype html><html><head><meta charset="utf-8">
-<title>Vision Inspection — Live Monitor</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<style>
- body{font-family:system-ui,sans-serif;margin:0;background:#eef1f6;color:#1b1f24}
- header{background:#3d6bf5;color:#fff;padding:14px 20px;font-size:1.2rem;font-weight:600}
- .wrap{padding:20px;max-width:1000px;margin:0 auto}
- .cards{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:18px}
- .card{background:#fff;border:1px solid #d9dee8;border-radius:10px;padding:16px 20px;flex:1;min-width:150px}
- .card .n{font-size:2rem;font-weight:700}.card .l{color:#5b6472;font-size:.85rem}
- table{border-collapse:collapse;width:100%;background:#fff;border:1px solid #d9dee8;border-radius:10px;overflow:hidden}
- th,td{padding:8px 12px;text-align:left;border-bottom:1px solid #eef1f5}
- th{background:#f1f4f8;color:#5b6472;font-size:.8rem}
- .ok{color:#1a7f37;font-weight:600}.bad{color:#c22;font-weight:600}
- #tok{padding:6px 10px;border:1px solid #d9dee8;border-radius:6px}
- .muted{color:#5b6472;font-size:.8rem;margin-top:8px}
-</style></head><body>
-<header>Vision Inspection — Live Monitor <span id="state" style="float:right"></span></header>
-<div class="wrap">
- <div id="auth" style="margin-bottom:14px">
-   API token: <input id="tok" placeholder="bearer token"> <button onclick="saveTok()">Connect</button>
- </div>
- <div class="cards">
-   <div class="card"><div class="n" id="total">—</div><div class="l">Total</div></div>
-   <div class="card"><div class="n ok" id="passed">—</div><div class="l">Passed</div></div>
-   <div class="card"><div class="n bad" id="failed">—</div><div class="l">Reject</div></div>
-   <div class="card"><div class="n" id="yield">—</div><div class="l">Yield %</div></div>
- </div>
- <h3>Recent batches</h3>
- <table><thead><tr><th>Batch</th><th>Product</th><th>Status</th><th>Total</th><th>Pass</th><th>Fail</th></tr></thead>
- <tbody id="batches"></tbody></table>
- <div class="muted" id="ts"></div>
-</div>
-<script>
- let tok = localStorage.getItem('vis_tok') || '';
- document.getElementById('tok').value = tok;
- function saveTok(){ tok = document.getElementById('tok').value.trim(); localStorage.setItem('vis_tok', tok); poll(); }
- async function get(p){ const r = await fetch(p, {headers: tok ? {Authorization:'Bearer '+tok} : {}}); if(!r.ok) throw new Error(r.status); return r.json(); }
- function set(id,v){ document.getElementById(id).textContent = v; }
- async function poll(){
-   try{
-     const c = await get('/api/counters');
-     set('total', c.total??'—'); set('passed', c.passed??'—');
-     set('failed', c.failed??'—'); set('yield', c.yield??'—');
-     const s = await get('/api/status');
-     set('state', (s.running?'● RUNNING':'● Idle'));
-     const b = await get('/api/batches');
-     document.getElementById('batches').innerHTML = (b.batches||[]).map(x =>
-       `<tr><td>${x.batch_no||''}</td><td>${x.product||''}</td><td>${x.status||''}</td>`+
-       `<td>${x.total||0}</td><td>${x.passed||0}</td><td>${x.failed||0}</td></tr>`).join('');
-     set('ts', 'Updated ' + new Date().toLocaleTimeString());
-   }catch(e){ set('state','● disconnected ('+e.message+')'); }
- }
- poll(); setInterval(poll, 3000);
-</script></body></html>"""

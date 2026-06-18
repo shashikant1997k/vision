@@ -120,7 +120,7 @@ def test_dashboard_served_without_token(tmp_path):
     server = ReadOnlyApiServer(sf, port=0, token="t").start()
     try:
         status, body = _get(server, "/")  # the HTML page itself needs no token
-        assert status == 200 and b"Live Monitor" in body
+        assert status == 200 and b"Vision Inspection" in body
     finally:
         server.stop()
 
@@ -164,3 +164,41 @@ def test_live_window_starts_web_server(tmp_path):
             assert resp.status == 200 and "total" in _json.loads(resp.read())
     finally:
         win.close()
+
+
+def test_overview_and_analytics_and_challenges(tmp_path):
+    sf, batch_id = _setup(tmp_path)
+    server = ReadOnlyApiServer(
+        sf, port=0, token="t",
+        status_provider=lambda: {"running": True},
+        counters_provider=lambda: {"total": 10, "passed": 8, "failed": 2, "yield": 80.0},
+    ).start()
+    try:
+        _, body = _get(server, "/api/overview", token="t")
+        ov = json.loads(body)
+        assert ov["counters"]["total"] == 10
+        assert ov["latest_batch"]["batch_no"] == "B-001"
+        assert ov["analytics"]["total"] == 10
+
+        _, body = _get(server, f"/api/analytics/{batch_id}", token="t")
+        a = json.loads(body)
+        assert a["per_camera"] and a["per_camera"][0]["camera"] == "cam1"
+        assert "defects_by_tool" in a
+
+        _, body = _get(server, "/api/challenges", token="t")
+        assert "challenges" in json.loads(body)
+    finally:
+        server.stop()
+
+
+def test_dashboard_has_console_views(tmp_path):
+    sf, batch_id = _setup(tmp_path)
+    server = ReadOnlyApiServer(sf, port=0, token="t").start()
+    try:
+        _, body = _get(server, "/")
+        page = body.decode()
+        for view in ("Overview", "Live line", "Batches", "OEE", "Reject analytics",
+                     "Serialization", "Challenge tests", "Audit trail"):
+            assert view in page
+    finally:
+        server.stop()

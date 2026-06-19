@@ -67,9 +67,36 @@ def main() -> int:
     cam.set_pixel_format_from_string("Mono8")
     cam.set_exposure_time(args.exposure)
     cam.set_gain(args.gain)
-    buf = cam.acquisition(3_000_000)
+
+    import contextlib
+
+    def grab_once():
+        """Manual single-frame grab tolerant of a control-channel timeout on
+        AcquisitionStop (on this Mac the frame is already captured by then)."""
+        stream = cam.create_stream(None, None)
+        with contextlib.suppress(Exception):
+            cam.gv_auto_packet_size()
+        stream.push_buffer(Aravis.Buffer.new_allocate(cam.get_payload()))
+        cam.start_acquisition()
+        b = stream.timeout_pop_buffer(3_000_000)
+        with contextlib.suppress(Exception):  # stop may time out — frame in hand
+            cam.stop_acquisition()
+        return b
+
+    buf = None
+    for attempt in range(3):
+        try:
+            buf = grab_once()
+            if buf is not None and buf.get_status() == Aravis.BufferStatus.SUCCESS:
+                break
+            buf = None
+        except Exception as exc:  # noqa: BLE001
+            print(f"  attempt {attempt + 1} failed ({exc}); retrying…")
+            time.sleep(1.0)
+            buf = None
     if buf is None:
-        print("grab timed out")
+        print("grab failed — power-cycle the camera (remove POWER, not just the "
+              "cable) and check the Ethernet adapter")
         return 2
     w, h = buf.get_image_width(), buf.get_image_height()
     img = np.frombuffer(bytes(buf.get_data()), np.uint8)[: w * h].reshape(h, w)

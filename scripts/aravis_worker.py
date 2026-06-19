@@ -118,21 +118,36 @@ def main() -> int:
         out.write(MAGIC + struct.pack(">IIII", w, h, pixel, len(data)) + data)
         out.flush()
 
-    # ONESHOT mode (default, reliable on macOS): one self-contained
-    # acquisition() per frame. Lower fps than a persistent stream but it does
-    # NOT overrun the host socket buffer the way a continuous GigE feed does.
+    # ONESHOT mode (default, reliable on macOS): SingleFrame over a persistent
+    # stream — start acquisition ONCE, then trigger a frame at a time. Avoids
+    # both the continuous-feed socket overflow AND the per-frame AcquisitionStop
+    # control-channel timeout this Mac+adapter exhibits.
     if args.acq_mode == "oneshot" and args.trigger != "hardware":
+        _safe(lambda: cam.set_acquisition_mode(Aravis.AcquisitionMode.SINGLE_FRAME))
+        try:
+            stream = cam.create_stream(None, None)
+            _safe(lambda: stream.set_property("packet-resend", Aravis.GvStreamPacketResend.ALWAYS))
+            payload = _safe(lambda: cam.get_payload()) or 0
+            for _ in range(2):
+                stream.push_buffer(Aravis.Buffer.new_allocate(payload))
+        except Exception as exc:  # noqa: BLE001
+            _err(f"FATAL: stream create failed: {exc}")
+            return 6
         _err("READY")
         try:
             while True:
-                buf = cam.acquisition(1_000_000)
-                if buf is not None and buf.get_status() == Aravis.BufferStatus.SUCCESS:
-                    emit(buf)
+                _safe(lambda: cam.start_acquisition())   # arm one frame
+                buf = stream.timeout_pop_buffer(2_000_000)
+                _safe(lambda: cam.stop_acquisition())     # tolerated if it times out
+                if buf is None:
+                    continue
+                try:
+                    if buf.get_status() == Aravis.BufferStatus.SUCCESS:
+                        emit(buf)
+                finally:
+                    stream.push_buffer(buf)
         except (BrokenPipeError, KeyboardInterrupt):
             return 0
-        except Exception as exc:  # noqa: BLE001
-            _err(f"FATAL: acquisition failed: {exc}")
-            return 6
 
     # STREAM mode: persistent continuous/triggered stream (fast; best on the
     # line PC, or macOS with a good adapter + raised socket buffers).

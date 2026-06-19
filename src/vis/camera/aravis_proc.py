@@ -13,11 +13,13 @@ injectable so the framing protocol is unit-tested with a fake worker.
 from __future__ import annotations
 
 import os
+import select
 import shutil
 import struct
 import subprocess
 import sys
 import threading
+from collections import deque
 from pathlib import Path
 
 import numpy as np
@@ -71,6 +73,7 @@ class AravisProcessCamera(CameraDevice):
     def __init__(
         self, camera_id: str, device_index: int = 0, device_id: str | None = None,
         settings=None, worker_cmd: list[str] | None = None, ready_timeout_s: float = 10.0,
+        grab_timeout_ms: int = 2000, verify_first_frame: bool = True,
     ) -> None:
         super().__init__(
             CameraInfo(id=camera_id, vendor="GigE Vision (Aravis worker)", interface="GigE Vision"),
@@ -80,8 +83,13 @@ class AravisProcessCamera(CameraDevice):
         self.device_id = device_id
         self._worker_cmd = worker_cmd
         self._ready_timeout = ready_timeout_s
+        self.grab_timeout_ms = grab_timeout_ms
+        self._verify_first_frame = verify_first_frame
+        self._pending_frame: Frame | None = None
         self._proc: subprocess.Popen | None = None
         self._frame_id = 0
+        self._stderr_tail: deque[str] = deque(maxlen=20)
+        self._stderr_thread: threading.Thread | None = None
 
     # ---- lifecycle ---------------------------------------------------------
     def _build_cmd(self) -> list[str]:
@@ -117,6 +125,22 @@ class AravisProcessCamera(CameraDevice):
         self._proc = subprocess.Popen(
             self._build_cmd(), stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0
         )
+        self._await_ready()
+        if self._verify_first_frame:
+            # confirm frames actually flow (catches a camera held by another
+            # process / no-stream) instead of silently stalling later
+            frame = self.grab()
+            if frame is None:
+                tail = " | ".join(list(self._stderr_tail)[-4:])
+                self._close_device()
+                raise RuntimeError(
+                    "Aravis worker produced no frames — the camera may be held by "
+                    "another app (close other viewers/instances), in a trigger mode "
+                    f"with no trigger, or unplugged. {tail}"
+                )
+            self._pending_frame = frame  # don't drop the first real frame
+
+    def _await_ready(self) -> None:
         # wait for the worker's READY line (or a FATAL error) on stderr
         deadline = threading.Event()
         timer = threading.Timer(self._ready_timeout, deadline.set)
@@ -129,13 +153,32 @@ class AravisProcessCamera(CameraDevice):
                     code = self._proc.poll()
                     raise RuntimeError(f"Aravis worker exited (code {code}) before READY")
                 text = line.decode(errors="ignore").strip()
+                if text:
+                    self._stderr_tail.append(text)
                 if text == "READY":
+                    self._start_stderr_drain()  # keep stderr empty so it never blocks
                     return
                 if text.startswith("FATAL"):
                     raise RuntimeError(f"Aravis worker: {text}")
             raise RuntimeError("Aravis worker did not become READY in time")
         finally:
             timer.cancel()
+
+    def _start_stderr_drain(self) -> None:
+        """Continuously drain the worker's stderr (keeping a short tail) so a
+        full stderr pipe can never block the worker — the classic deadlock that
+        freezes acquisition."""
+        def drain():
+            stream = self._proc.stderr if self._proc else None
+            if stream is None:
+                return
+            for raw in iter(stream.readline, b""):
+                line = raw.decode(errors="ignore").strip()
+                if line:
+                    self._stderr_tail.append(line)
+
+        self._stderr_thread = threading.Thread(target=drain, daemon=True, name="aravis-stderr")
+        self._stderr_thread.start()
 
     def _close_device(self) -> None:
         if self._proc is not None:
@@ -147,10 +190,17 @@ class AravisProcessCamera(CameraDevice):
             self._proc = None
 
     # ---- acquisition --------------------------------------------------------
-    def _read_exact(self, n: int) -> bytes | None:
+    def _read_exact(self, n: int, timeout_s: float | None = None) -> bytes | None:
+        """Read exactly n bytes. With a timeout, returns None if no data becomes
+        available within it (so a stalled/busy camera never blocks the caller)."""
         buf = b""
         stream = self._proc.stdout
+        fd = stream.fileno()
         while len(buf) < n:
+            if timeout_s is not None:
+                ready, _, _ = select.select([fd], [], [], timeout_s)
+                if not ready:
+                    return None  # no frame in time — don't hang
             chunk = stream.read(n - len(buf))
             if not chunk:
                 return None
@@ -158,10 +208,14 @@ class AravisProcessCamera(CameraDevice):
         return buf
 
     def grab(self) -> Frame | None:
+        if self._pending_frame is not None:  # the frame captured during open()
+            frame, self._pending_frame = self._pending_frame, None
+            return frame
         if self._proc is None or self._proc.stdout is None:
             return None
-        # resync to the magic marker
-        magic = self._read_exact(4)
+        # wait (bounded) for the start of a frame, then read it; a busy/stalled
+        # camera returns None rather than freezing the caller
+        magic = self._read_exact(4, timeout_s=self.grab_timeout_ms / 1000.0)
         if magic is None:
             return None
         while magic != MAGIC:

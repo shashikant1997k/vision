@@ -97,3 +97,32 @@ taught on the Mac runs unchanged on the line PC.
 | `Aravis not found` in the app | Re-check step 1 (GI_TYPELIB_PATH / DYLD_LIBRARY_PATH) |
 | Unsupported pixel format error | Set PixelFormat = Mono8 or RGB8 |
 | Low/unstable frame rate | Use a wired Gigabit link, jumbo frames, lower resolution/ROI; for production use the line PC |
+
+## 6. macOS GigE streaming: SingleFrame + socket buffer (important)
+
+Two macOS/GigE gotchas the app's worker now handles automatically, plus one
+manual step:
+
+- **SingleFrame default** — many cameras (incl. this Baumer VCXG-24C) power up in
+  `AcquisitionMode=SingleFrame` (one frame per start). The worker forces
+  `Continuous`. *(auto — no action needed.)*
+- **Stream overflow** — a continuous GigE feed (~1.5 MB/frame) overruns the
+  default macOS socket buffer and ~100% of frames are dropped. The worker sets a
+  16 MB stream socket buffer + packet-resend, **but the kernel caps it at 8 MB**.
+  Raise the ceiling once per boot:
+  ```bash
+  sudo bash scripts/mac_gige_tune.sh      # maxsockbuf 32MB, udp recvspace 8MB
+  ```
+- **Stuck control channel** — if you see `GigEVision read_memory/write_memory
+  timeout`, the camera's control channel is wedged (often after an aborted
+  stream). **Power-cycle the camera** (unplug power + Ethernet, wait ~10 s,
+  replug), then re-run `arv-tool-0.8` to confirm it's back.
+
+### Reliable order of operations
+1. `sudo bash scripts/mac_gige_tune.sh`  (once per boot)
+2. Power-cycle the camera if control commands are timing out.
+3. `/opt/homebrew/bin/python3 scripts/aravis_snapshot.py`  (one-shot — most robust; for focus)
+4. `.venv/bin/python scripts/live_focus.py`  or  `.venv/bin/vis-hmi`  (live stream)
+
+Note: macOS GigE throughput is adapter-dependent; for full production frame
+rates the Windows/Linux line PC with the vendor SDK remains the target.

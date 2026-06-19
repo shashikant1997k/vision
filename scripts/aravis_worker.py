@@ -95,6 +95,10 @@ def main() -> int:
     _safe(lambda: cam.set_exposure_time(args.exposure))
     _safe(lambda: cam.set_gain_auto(Aravis.Auto.OFF))
     _safe(lambda: cam.set_gain(args.gain))
+    # the camera may default to SingleFrame (one frame per start) — force
+    # Continuous so the stream keeps delivering frames
+    _safe(lambda: cam.set_acquisition_mode(Aravis.AcquisitionMode.CONTINUOUS))
+    _safe(lambda: cam.gv_auto_packet_size())  # negotiate a safe packet size for the link
     if args.fps:
         _safe(lambda: cam.set_frame_rate(args.fps))
     if args.region:
@@ -113,6 +117,10 @@ def main() -> int:
 
     try:
         stream = cam.create_stream(None, None)
+        # macOS GigE: a large socket buffer + packet resend avoids the stream
+        # overflow that otherwise drops ~100% of a continuous feed
+        _safe(lambda: stream.set_property("socket-buffer-size", 16 * 1024 * 1024))
+        _safe(lambda: stream.set_property("packet-resend", Aravis.GvStreamPacketResend.ALWAYS))
         payload = _safe(lambda: cam.get_payload()) or 0
         for _ in range(args.buffers):
             stream.push_buffer(Aravis.Buffer.new_allocate(payload))

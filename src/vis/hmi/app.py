@@ -62,11 +62,13 @@ def _make_camera_factory():
             return False
 
     def aravis_available() -> bool:
+        # NB: never import Aravis in the app's (venv) Python — on macOS the pip
+        # PyGObject binding segfaults. Probe out-of-process and only auto-select
+        # Aravis when a camera is actually connected (else fall back to the sim).
         try:
-            from ..camera.aravis_cam import load_aravis
+            from ..camera.aravis_proc import count_devices
 
-            load_aravis()
-            return True
+            return count_devices() > 0
         except Exception:
             return False
 
@@ -82,13 +84,15 @@ def _make_camera_factory():
 
     if choice == "aravis" or (choice == "auto" and aravis_available()):
         def aravis_factory(camera_id, settings, recipe):
-            from ..camera.aravis_cam import AravisCamera
+            # out-of-process worker (reliable on macOS); the in-venv binding
+            # segfaults, so we read frames from a brew-python worker subprocess.
+            from ..camera.aravis_proc import AravisProcessCamera
 
             dev = _hik_device_for(camera_id)  # same id->index/serial mapping
             kwargs = {"device_id": dev["serial"]} if "serial" in dev else {
                 "device_index": dev.get("device_index", 0)
             }
-            camera = AravisCamera(camera_id, settings=settings, **kwargs)
+            camera = AravisProcessCamera(camera_id, settings=settings, **kwargs)
             camera.open()
             return camera
 

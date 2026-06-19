@@ -53,17 +53,29 @@ def main() -> int:
         _err(f"FATAL: cannot import Aravis: {exc}")
         return 2
 
+    import time
+
+    def discover(retries=6, pause=0.4):
+        """GigE discovery is intermittent on some hosts (broadcast races) — retry
+        until a device appears."""
+        n = 0
+        for _ in range(retries):
+            try:
+                Aravis.update_device_list()
+                n = Aravis.get_n_devices()
+            except Exception:  # noqa: BLE001
+                n = 0
+            if n > 0:
+                return n
+            time.sleep(pause)
+        return n
+
     if args.probe:
-        try:
-            Aravis.update_device_list()
-            print(f"DEVICES {Aravis.get_n_devices()}")
-        except Exception:  # noqa: BLE001
-            print("DEVICES 0")
+        print(f"DEVICES {discover()}")
         return 0
 
     try:
-        Aravis.update_device_list()
-        n = Aravis.get_n_devices()
+        n = discover()
         if n == 0:
             _err("FATAL: no GigE Vision cameras found")
             return 3

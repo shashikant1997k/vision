@@ -141,28 +141,41 @@ class AravisProcessCamera(CameraDevice):
             self._pending_frame = frame  # don't drop the first real frame
 
     def _await_ready(self) -> None:
-        # wait for the worker's READY line (or a FATAL error) on stderr
-        deadline = threading.Event()
-        timer = threading.Timer(self._ready_timeout, deadline.set)
-        timer.daemon = True
-        timer.start()
-        try:
-            while not deadline.is_set():
-                line = self._proc.stderr.readline()
-                if not line:
-                    code = self._proc.poll()
-                    raise RuntimeError(f"Aravis worker exited (code {code}) before READY")
-                text = line.decode(errors="ignore").strip()
-                if text:
-                    self._stderr_tail.append(text)
-                if text == "READY":
-                    self._start_stderr_drain()  # keep stderr empty so it never blocks
-                    return
-                if text.startswith("FATAL"):
-                    raise RuntimeError(f"Aravis worker: {text}")
-            raise RuntimeError("Aravis worker did not become READY in time")
-        finally:
-            timer.cancel()
+        # wait for the worker's READY line (or a FATAL error) on stderr, using a
+        # REAL deadline: select() so a stuck worker (camera control channel
+        # wedged) can't block past the timeout in a blocking readline().
+        import time
+
+        end = time.monotonic() + self._ready_timeout
+        fd = self._proc.stderr.fileno()
+        while True:
+            remaining = end - time.monotonic()
+            if remaining <= 0:
+                tail = " | ".join(list(self._stderr_tail)[-3:])
+                raise RuntimeError(
+                    "Aravis worker did not become READY — the camera is likely "
+                    "stuck (power-cycle it) or held by another app. " + tail
+                )
+            ready, _, _ = select.select([fd], [], [], min(remaining, 0.5))
+            if not ready:
+                if self._proc.poll() is not None:
+                    raise RuntimeError(
+                        f"Aravis worker exited (code {self._proc.returncode}) before READY"
+                    )
+                continue
+            line = self._proc.stderr.readline()
+            if not line:
+                raise RuntimeError(
+                    f"Aravis worker exited (code {self._proc.poll()}) before READY"
+                )
+            text = line.decode(errors="ignore").strip()
+            if text:
+                self._stderr_tail.append(text)
+            if text == "READY":
+                self._start_stderr_drain()  # keep stderr empty so it never blocks
+                return
+            if text.startswith("FATAL"):
+                raise RuntimeError(f"Aravis worker: {text}")
 
     def _start_stderr_drain(self) -> None:
         """Continuously drain the worker's stderr (keeping a short tail) so a

@@ -74,6 +74,7 @@ class AravisProcessCamera(CameraDevice):
         self, camera_id: str, device_index: int = 0, device_id: str | None = None,
         settings=None, worker_cmd: list[str] | None = None, ready_timeout_s: float = 10.0,
         grab_timeout_ms: int = 2000, verify_first_frame: bool = True,
+        acq_mode: str = "oneshot",
     ) -> None:
         super().__init__(
             CameraInfo(id=camera_id, vendor="GigE Vision (Aravis worker)", interface="GigE Vision"),
@@ -85,6 +86,7 @@ class AravisProcessCamera(CameraDevice):
         self._ready_timeout = ready_timeout_s
         self.grab_timeout_ms = grab_timeout_ms
         self._verify_first_frame = verify_first_frame
+        self._acq_mode = acq_mode
         self._pending_frame: Frame | None = None
         self._proc: subprocess.Popen | None = None
         self._frame_id = 0
@@ -112,6 +114,7 @@ class AravisProcessCamera(CameraDevice):
             "--exposure", str(float(s.exposure_us)), "--gain", str(float(s.gain_db)),
             "--fps", str(float(s.frame_rate)), "--trigger", trigger,
             "--source", s.trigger.source or "Line0",
+            "--acq-mode", self._acq_mode,
         ]
         if self.device_id:
             cmd += ["--device-id", self.device_id]

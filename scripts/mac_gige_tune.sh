@@ -1,10 +1,10 @@
 #!/bin/bash
-# Raise macOS kernel socket buffers so GigE Vision continuous streaming doesn't
-# overflow (the default 8 MB maxsockbuf drops ~100% of a continuous feed). Run
-# once per boot:  sudo bash scripts/mac_gige_tune.sh
-# (these are runtime sysctls; they reset on reboot — re-run after a restart.)
-set -e
-sysctl -w kern.ipc.maxsockbuf=33554432      # 32 MB socket buffer ceiling
-sysctl -w net.inet.udp.recvspace=8388608     # 8 MB default UDP receive buffer
-echo "Done. Current values:"
+# Raise macOS UDP socket buffers for GigE Vision *continuous stream* mode.
+# NOTE: the worker defaults to the reliable per-frame "oneshot" mode, which does
+# NOT need this. Only run this if you switch to stream mode (acq_mode=stream).
+# macOS hard-caps kern.ipc.maxsockbuf (often ~8 MB), so we raise what we can and
+# never fail.  Run:  sudo bash scripts/mac_gige_tune.sh   (resets on reboot)
+sysctl -w net.inet.udp.recvspace=6291456 2>/dev/null || true   # 6 MB UDP recv (under maxsockbuf)
+sysctl -w kern.ipc.maxsockbuf=8388608 2>/dev/null || true       # keep at the macOS ceiling
+echo "Current values:"
 sysctl kern.ipc.maxsockbuf net.inet.udp.recvspace

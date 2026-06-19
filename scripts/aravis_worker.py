@@ -38,6 +38,9 @@ def main() -> int:
     p.add_argument("--source", default="Line0")
     p.add_argument("--region", default="")                    # "x,y,w,h"
     p.add_argument("--buffers", type=int, default=8)
+    p.add_argument("--acq-mode", default="oneshot", choices=("oneshot", "stream"),
+                   help="oneshot: reliable per-frame acquisition (macOS default); "
+                        "stream: persistent continuous stream (fast, line-PC)")
     p.add_argument("--probe", action="store_true",
                    help="print 'DEVICES n' and exit (used for auto-detection)")
     args = p.parse_args()
@@ -107,6 +110,35 @@ def main() -> int:
             _safe(lambda: cam.set_region(x, y, w, h))
         except ValueError:
             pass
+
+    out = sys.stdout.buffer
+
+    def emit(buf) -> None:
+        w = int(buf.get_image_width())
+        h = int(buf.get_image_height())
+        pixel = int(buf.get_image_pixel_format())
+        data = bytes(buf.get_data())
+        out.write(MAGIC + struct.pack(">IIII", w, h, pixel, len(data)) + data)
+        out.flush()
+
+    # ONESHOT mode (default, reliable on macOS): one self-contained
+    # acquisition() per frame. Lower fps than a persistent stream but it does
+    # NOT overrun the host socket buffer the way a continuous GigE feed does.
+    if args.acq_mode == "oneshot" and args.trigger != "hardware":
+        _err("READY")
+        try:
+            while True:
+                buf = cam.acquisition(1_000_000)
+                if buf is not None and buf.get_status() == Aravis.BufferStatus.SUCCESS:
+                    emit(buf)
+        except (BrokenPipeError, KeyboardInterrupt):
+            return 0
+        except Exception as exc:  # noqa: BLE001
+            _err(f"FATAL: acquisition failed: {exc}")
+            return 6
+
+    # STREAM mode: persistent continuous/triggered stream (fast; best on the
+    # line PC, or macOS with a good adapter + raised socket buffers).
     software = args.trigger == "software"
     if args.trigger == "continuous":
         _safe(lambda: cam.clear_triggers())
@@ -130,7 +162,6 @@ def main() -> int:
         return 5
 
     _err("READY")  # the app waits for this line before grabbing
-    out = sys.stdout.buffer
     try:
         while True:
             if software:
@@ -139,14 +170,8 @@ def main() -> int:
             if buf is None:
                 continue
             try:
-                if buf.get_status() != Aravis.BufferStatus.SUCCESS:
-                    continue
-                w = int(buf.get_image_width())
-                h = int(buf.get_image_height())
-                pixel = int(buf.get_image_pixel_format())
-                data = bytes(buf.get_data())
-                out.write(MAGIC + struct.pack(">IIII", w, h, pixel, len(data)) + data)
-                out.flush()
+                if buf.get_status() == Aravis.BufferStatus.SUCCESS:
+                    emit(buf)
             finally:
                 stream.push_buffer(buf)
     except (BrokenPipeError, KeyboardInterrupt):

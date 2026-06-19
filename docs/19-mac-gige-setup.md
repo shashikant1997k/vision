@@ -106,13 +106,12 @@ manual step:
 - **SingleFrame default** — many cameras (incl. this Baumer VCXG-24C) power up in
   `AcquisitionMode=SingleFrame` (one frame per start). The worker forces
   `Continuous`. *(auto — no action needed.)*
-- **Stream overflow** — a continuous GigE feed (~1.5 MB/frame) overruns the
-  default macOS socket buffer and ~100% of frames are dropped. The worker sets a
-  16 MB stream socket buffer + packet-resend, **but the kernel caps it at 8 MB**.
-  Raise the ceiling once per boot:
-  ```bash
-  sudo bash scripts/mac_gige_tune.sh      # maxsockbuf 32MB, udp recvspace 8MB
-  ```
+- **Continuous-stream packet loss** — a continuous GigE feed (~1.5 MB/frame)
+  overruns the macOS socket buffer and most frames drop, and macOS hard-caps the
+  buffer. So the worker DEFAULTS to a reliable **per-frame "oneshot" acquisition
+  loop** (one self-contained capture per frame) — lower fps, but it never
+  overruns the host. No tuning needed. *(For higher fps on a good adapter you can
+  switch to `acq_mode="stream"` and run `sudo bash scripts/mac_gige_tune.sh`.)*
 - **Stuck control channel** — if you see `GigEVision read_memory/write_memory
   timeout`, the camera's control channel is wedged (often after an aborted
   stream). **Power-cycle the camera** (unplug power + Ethernet, wait ~10 s,

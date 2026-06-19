@@ -98,9 +98,6 @@ def main() -> int:
     _safe(lambda: cam.set_exposure_time(args.exposure))
     _safe(lambda: cam.set_gain_auto(Aravis.Auto.OFF))
     _safe(lambda: cam.set_gain(args.gain))
-    # the camera may default to SingleFrame (one frame per start) — force
-    # Continuous so the stream keeps delivering frames
-    _safe(lambda: cam.set_acquisition_mode(Aravis.AcquisitionMode.CONTINUOUS))
     _safe(lambda: cam.gv_auto_packet_size())  # negotiate a safe packet size for the link
     if args.fps:
         _safe(lambda: cam.set_frame_rate(args.fps))
@@ -139,6 +136,9 @@ def main() -> int:
 
     # STREAM mode: persistent continuous/triggered stream (fast; best on the
     # line PC, or macOS with a good adapter + raised socket buffers).
+    # Force Continuous so the stream keeps delivering (cameras may default to
+    # SingleFrame). Only here — it would break the oneshot acquisition() path.
+    _safe(lambda: cam.set_acquisition_mode(Aravis.AcquisitionMode.CONTINUOUS))
     software = args.trigger == "software"
     if args.trigger == "continuous":
         _safe(lambda: cam.clear_triggers())

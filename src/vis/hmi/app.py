@@ -43,9 +43,10 @@ def _hik_device_for(camera_id: str) -> dict:
 
 def _make_camera_factory():
     """Pick the acquisition source, best first:
-    1. Hikrobot MVS SDK   (VIS_CAMERA=hikrobot, or auto when the SDK imports)
-    2. GenTL / Harvester  (VIS_GENTL_CTI set — any GigE Vision camera)
-    3. Simulator          (development; the HMI shows a SIMULATION banner)
+    1. Hikrobot MVS SDK   (VIS_CAMERA=hikrobot, or auto when the SDK imports) — line PC
+    2. Aravis GigE Vision (VIS_CAMERA=aravis, or auto when Aravis imports) — macOS/dev
+    3. GenTL / Harvester  (VIS_GENTL_CTI set — any GigE Vision camera)
+    4. Simulator          (development; the HMI shows a SIMULATION banner)
     Returns (factory, simulation)."""
     import os
 
@@ -60,6 +61,15 @@ def _make_camera_factory():
         except Exception:
             return False
 
+    def aravis_available() -> bool:
+        try:
+            from ..camera.aravis_cam import load_aravis
+
+            load_aravis()
+            return True
+        except Exception:
+            return False
+
     if choice == "hikrobot" or (choice == "auto" and hik_available()):
         def hik_factory(camera_id, settings, recipe):
             from ..camera.hikrobot import HikrobotCamera
@@ -69,6 +79,20 @@ def _make_camera_factory():
             return camera
 
         return hik_factory, False
+
+    if choice == "aravis" or (choice == "auto" and aravis_available()):
+        def aravis_factory(camera_id, settings, recipe):
+            from ..camera.aravis_cam import AravisCamera
+
+            dev = _hik_device_for(camera_id)  # same id->index/serial mapping
+            kwargs = {"device_id": dev["serial"]} if "serial" in dev else {
+                "device_index": dev.get("device_index", 0)
+            }
+            camera = AravisCamera(camera_id, settings=settings, **kwargs)
+            camera.open()
+            return camera
+
+        return aravis_factory, False
 
     cti = os.environ.get("VIS_GENTL_CTI")
     if choice == "gige" or (choice == "auto" and cti):

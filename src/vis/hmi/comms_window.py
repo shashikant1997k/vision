@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..db.app_settings import SettingsService
+from ..integrations.format import OutputTemplate
 from ..io.signals import SignalMap
 
 COMMS_KEY = "comms"
@@ -31,6 +32,8 @@ DEFAULTS = {
     "web_port": 9480,
     "web_token": "",
     "signals": SignalMap().to_dict(),
+    # configurable host/PLC/MES output (CodeScan-style Output Template)
+    "output_template": {**OutputTemplate().to_dict(), "host": "", "port": 9420},
 }
 
 
@@ -41,6 +44,9 @@ def load_comms_config(session_factory) -> dict:
     merged_signals = dict(DEFAULTS["signals"])
     merged_signals.update(saved.get("signals") or {})
     config["signals"] = merged_signals
+    merged_output = dict(DEFAULTS["output_template"])
+    merged_output.update(saved.get("output_template") or {})
+    config["output_template"] = merged_output
     return config
 
 
@@ -90,6 +96,48 @@ class CommsWindow(QMainWindow):
         web_box = QGroupBox("Read-only web monitoring (remote dashboard)")
         web_box.setLayout(web_form)
 
+        # --- configurable Output Template (host/PLC/MES result feed) ---
+        ot = config["output_template"]
+        self._out_enabled = QCheckBox("Send each result to a host/PLC/MES in a custom format")
+        self._out_enabled.setChecked(bool(ot.get("enabled")))
+        self._out_host = QLineEdit(ot.get("host", ""))
+        self._out_host.setPlaceholderText("host IP to connect out to (blank = act as server)")
+        self._out_port = QSpinBox()
+        self._out_port.setRange(1, 65535)
+        self._out_port.setValue(int(ot.get("port", 9420)))
+        self._out_prefix = QLineEdit(ot.get("prefix", ""))
+        self._out_suffix = QLineEdit(ot.get("suffix", ""))
+        self._out_ok = QLineEdit(ot.get("ok_token", "PASS"))
+        self._out_nok = QLineEdit(ot.get("nok_token", "FAIL"))
+        self._out_badread = QLineEdit(ot.get("bad_read_token", ""))
+        self._out_badread.setPlaceholderText("value sent for a field that did not read")
+        self._out_sep = QLineEdit(ot.get("separator", "|"))
+        self._out_term = QComboBox()
+        for label, val in (("CR LF", "\\r\\n"), ("LF", "\\n"), ("CR", "\\r"),
+                           ("Tab", "\\t"), ("none", "")):
+            self._out_term.addItem(label, val)
+        ti = self._out_term.findData(ot.get("terminator", "\\r\\n"))
+        self._out_term.setCurrentIndex(ti if ti >= 0 else 0)
+        self._out_fields = QLineEdit(",".join(ot.get("fields") or ["result", "*"]))
+        self._out_fields.setToolTip(
+            "Field order, comma-separated. Tokens: result, frame_id, camera_id, "
+            "region_id, reject_output, a tool id (its read value), or * for all fields."
+        )
+        out_form = QFormLayout()
+        out_form.addRow(self._out_enabled)
+        out_form.addRow("Host (connect out)", self._out_host)
+        out_form.addRow("Port", self._out_port)
+        out_form.addRow("Field order", self._out_fields)
+        out_form.addRow("Separator", self._out_sep)
+        out_form.addRow("Prefix", self._out_prefix)
+        out_form.addRow("Suffix", self._out_suffix)
+        out_form.addRow("PASS token", self._out_ok)
+        out_form.addRow("FAIL token", self._out_nok)
+        out_form.addRow("Bad-read token", self._out_badread)
+        out_form.addRow("Terminator", self._out_term)
+        out_box = QGroupBox("Output template (results → host / PLC / MES)")
+        out_box.setLayout(out_form)
+
         # --- 24V hard-wired signals ---
         self._io_backend = QComboBox()
         self._io_backend.addItem("Simulated (development)", "simulated")
@@ -131,6 +179,7 @@ class CommsWindow(QMainWindow):
         root = QVBoxLayout()
         root.addWidget(tcp_box)
         root.addWidget(web_box)
+        root.addWidget(out_box)
         root.addWidget(io_box)
         root.addWidget(save)
         root.addWidget(self._status)
@@ -159,6 +208,20 @@ class CommsWindow(QMainWindow):
             "web_port": self._web_port.value(),
             "web_token": self._web_token.text().strip(),
             "signals": signals,
+            "output_template": {
+                "enabled": self._out_enabled.isChecked(),
+                "transport": "tcp",
+                "host": self._out_host.text().strip(),
+                "port": self._out_port.value(),
+                "prefix": self._out_prefix.text(),
+                "suffix": self._out_suffix.text(),
+                "ok_token": self._out_ok.text(),
+                "nok_token": self._out_nok.text(),
+                "bad_read_token": self._out_badread.text(),
+                "separator": self._out_sep.text(),
+                "terminator": self._out_term.currentData(),
+                "fields": [f.strip() for f in self._out_fields.text().split(",") if f.strip()],
+            },
         }
 
     def _save(self) -> None:

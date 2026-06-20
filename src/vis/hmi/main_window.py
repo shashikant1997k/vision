@@ -431,6 +431,8 @@ class MainWindow(QMainWindow):
         self._serials = None
         self._duplicate_serials = 0
         self._web = None
+        self._out_transport = None  # configurable Output Template result feed
+        self._out_publisher = None
         self._downtime_event_id = None  # open when the line is stopped mid-batch
         self.remoteStart.connect(self.start)
         self.remoteStop.connect(self.stop)
@@ -580,6 +582,8 @@ class MainWindow(QMainWindow):
             bus.subscribe("inspection.result", self._proto.on_result)
         if self._signals is not None:
             bus.subscribe("inspection.result", self._signals.on_result)
+        if self._out_publisher is not None:
+            bus.subscribe("inspection.result", self._out_publisher.on_result)
         assignments = []
         # Reflect the state change IMMEDIATELY — opening the camera can take ~1s,
         # and the operator must see Start disable / Stop enable / "Starting…" at
@@ -753,6 +757,27 @@ class MainWindow(QMainWindow):
         if getattr(self, "_web", None) is not None:
             self._web.stop()
             self._web = None
+        if getattr(self, "_out_transport", None) is not None:
+            self._out_transport.close()
+            self._out_transport = None
+            self._out_publisher = None
+
+        ot = (config or {}).get("output_template") or {}
+        if ot.get("enabled"):
+            from ..integrations.format import OutputTemplate, format_template
+            from ..integrations.publisher import ResultPublisher
+            from ..integrations.tcp import TcpResultClient, TcpResultServer
+
+            host = (ot.get("host") or "").strip()
+            port = int(ot.get("port", 9420))
+            # connect OUT to a host (PLC/MES) if given, else act as a server clients attach to
+            self._out_transport = (
+                TcpResultClient(host, port) if host else TcpResultServer(port=port)
+            )
+            template = OutputTemplate.from_dict(ot)
+            self._out_publisher = ResultPublisher(
+                self._out_transport, lambda r: format_template(r, template)
+            )
 
         signal_map = None
         if config and any((config.get("signals") or {}).get(k) for k in

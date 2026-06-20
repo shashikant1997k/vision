@@ -26,6 +26,50 @@ def test_result_record_shape():
     assert any(k.endswith("_lot") for k in rec["fields"])
 
 
+def _synthetic(passed=True, lot="ABC123", date=""):
+    from vis.engine.aggregator import RegionResult
+    from vis.tools.base import ToolResult
+
+    return RegionResult(
+        frame_id=7, camera_id="cam1", region_id="front", reject_output="lane1",
+        passed=passed,
+        tool_results=[
+            ToolResult(tool_id="lot", passed=bool(lot), measured_value=lot),
+            ToolResult(tool_id="date", passed=bool(date), measured_value=date),
+        ],
+    )
+
+
+def test_output_template_orders_fields_with_wrapper():
+    from vis.integrations.format import OutputTemplate, format_template
+
+    tpl = OutputTemplate(
+        prefix="<", suffix=">", ok_token="OK", nok_token="NG", separator=",",
+        terminator="\\r\\n", fields=["result", "lot", "date", "camera_id"],
+        bad_read_token="NOREAD",
+    )
+    out = format_template(_synthetic(passed=True, lot="ABC123", date="0624"), tpl)
+    assert out == "<OK,ABC123,0624,cam1>\r\n"
+
+
+def test_output_template_marks_bad_read_and_fail():
+    from vis.integrations.format import OutputTemplate, format_template
+
+    tpl = OutputTemplate(ok_token="OK", nok_token="NG", separator="|",
+                         terminator="", bad_read_token="NOREAD",
+                         fields=["result", "lot", "date"])
+    # a date that failed to read ('?' present) → bad-read token; overall FAIL
+    out = format_template(_synthetic(passed=False, lot="ABC123", date="06?4"), tpl)
+    assert out == "NG|ABC123|NOREAD"
+
+
+def test_output_template_roundtrips_through_dict():
+    from vis.integrations.format import OutputTemplate
+
+    tpl = OutputTemplate(name="line3", enabled=True, fields=["result", "*"])
+    assert OutputTemplate.from_dict(tpl.to_dict()) == tpl
+
+
 def test_tcp_publish_to_connected_client():
     server = TcpResultServer(host="127.0.0.1", port=0)
     try:

@@ -15,7 +15,8 @@ def _ensure_default_admin(users) -> None:
 def _sim_factory(camera_id, settings, recipe):
     from ..engine.sim import SimulatedCodeCamera
 
-    return SimulatedCodeCamera(camera_id, recipe, num_frames=60, defect_rate=0.25, seed=0)
+    # num_frames=None → stream continuously (live demo), like a real camera
+    return SimulatedCodeCamera(camera_id, recipe, num_frames=None, defect_rate=0.25, seed=0)
 
 
 def _hik_device_for(camera_id: str) -> dict:

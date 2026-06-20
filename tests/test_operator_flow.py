@@ -106,6 +106,7 @@ def test_consecutive_reject_alarm_stops_the_line(tmp_path):
     win = MainWindow(username="op", recipe=build_code_demo_recipe(),
                      camera_factory=_factory(defect_rate=1.0, frames=8),
                      session_factory=sf, user_id=op, alarm_consecutive_rejects=3)
+    win._batch_id = 1  # the line-stop alarm only guards a running production batch
     win.start()
     if win._runner is not None:
         win._runner.join()

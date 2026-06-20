@@ -89,13 +89,20 @@ class SimulatedCodeCamera(Camera):
         self._rng = random.Random(seed)
 
     def frames(self) -> Iterator[Frame]:
-        for i in range(self.num_frames):
+        import time
+
+        i = 0
+        # num_frames=None streams forever (live demo); a number bounds it (tests)
+        while self.num_frames is None or i < self.num_frames:
             img = np.full((self.height, self.width, 3), 255, dtype=np.uint8)  # white bg
             for region in self.recipe.regions:
                 defective = self._rng.random() < self.defect_rate
                 for tool in region.tools:
                     self._render_tool(img, region, tool, defective)
             yield Frame(self.camera_id, i, img, timestamp=float(i))
+            i += 1
+            if self.num_frames is None:
+                time.sleep(0.1)  # ~10 fps so the live view is watchable, not a CPU spin
 
     def _blit(self, img, y0, x0, patch) -> None:
         """Write `patch` at (x0, y0), clipped to the image bounds — so a recipe

@@ -1375,8 +1375,10 @@ class MainWindow(QMainWindow):
         self._review.setText(f"Review rejects… ({len(self._failed_log)})")
 
         # GMP line-stop: N consecutive rejects means a systematic failure (e.g.
-        # the coder stopped printing) — stop the line and alarm, don't keep ejecting
-        if self._runner is not None and self._alarm_threshold:
+        # the coder stopped printing) — stop the line and alarm, don't keep
+        # ejecting. Only in production (a batch is running); in test/setup mode
+        # the line keeps running so the recipe can be tuned while watching live.
+        if self._runner is not None and self._alarm_threshold and self._batch_id is not None:
             streak = self._stats.consecutive_failures()
             if streak >= self._alarm_threshold:
                 self.stop()

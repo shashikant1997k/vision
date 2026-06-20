@@ -51,9 +51,24 @@ def get_code_reader(name: str | None = None):
 
 
 def _builtin_text(image, config):
-    from .ocr import recognize
+    from .ocr import _match_key, _normalize, recognize
 
-    return recognize(image)
+    # For verification (we know the expected value/pattern), let the reader try
+    # all image transforms until the text resolves through glare/reflection.
+    mode = (config or {}).get("match", "exact")
+    expected = (config or {}).get("expected") or ""
+    accept = None
+    if mode in ("exact", "contains") and expected:
+        key = _match_key(expected)
+        if key:
+            accept = (lambda t: _match_key(_normalize(t, config)) == key) if mode == "exact" \
+                else (lambda t: key in _match_key(_normalize(t, config)))
+    elif mode == "regex" and (config or {}).get("pattern"):
+        import re
+
+        pattern = config["pattern"]
+        accept = lambda t: bool(re.fullmatch(pattern, _normalize(t, config)))  # noqa: E731
+    return recognize(image, accept=accept)
 
 
 def _builtin_code(image, config):

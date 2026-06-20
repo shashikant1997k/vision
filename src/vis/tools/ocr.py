@@ -206,10 +206,14 @@ def _metric(text: str, score: float) -> float:
 
 
 def _prepare_variants(image) -> list:
-    """Several preprocessed RGB variants of an ROI — OCR reads each and keeps the
-    best. Pharma cartons vary wildly (foil, security guilloche/mesh, faint TIJ
-    dates on a busy background); no single filter wins, so we try a contrast-
-    normalised, a denoised, and a background-flattened version."""
+    """Several preprocessed RGB variants of an ROI — the reader OCRs each and keeps
+    the read that resolves. Industrial OCV (Cognex/Keyence) reads by transforming
+    the crop into whichever representation makes the text fully visible; no single
+    filter wins across glare/foil/security-mesh/faint print, so we offer a panel:
+    contrast-normalised, denoised, illumination-flattened, locally-thresholded,
+    glare-clipped and background-flattened. Variant 0 is the proven default."""
+    import numpy as np
+
     arr = _pad(image, 6)
     try:
         import cv2
@@ -222,33 +226,48 @@ def _prepare_variants(image) -> list:
         factor = min(4.0, target / h)
         gray = cv2.resize(gray, None, fx=factor, fy=factor, interpolation=cv2.INTER_CUBIC)
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-    variants = []
-    # 1. contrast-normalised — the proven default that reads clean print
-    variants.append(clahe.apply(gray) if gray.std() < 55 else gray)
-    # 2. edge-preserving denoise + normalise — suppresses security-mesh speckle
-    variants.append(clahe.apply(cv2.bilateralFilter(gray, 7, 60, 60)))
-    # 3. background-flattened — lifts dark print off a busy/textured background
+    out = []
+    # 1. contrast-normalised — proven default for clean print
+    out.append(clahe.apply(gray) if gray.std() < 55 else gray)
+    # 2. edge-preserving denoise + normalise — security-mesh / speckle
+    out.append(clahe.apply(cv2.bilateralFilter(gray, 7, 60, 60)))
+    # 3. illumination-flattened — divide by a large blur to even out glare/foil
+    #    gradients and specular fall-off (flat-field / homomorphic style)
+    sigma = max(3.0, gray.shape[0] / 3.0)
+    blur = cv2.GaussianBlur(gray, (0, 0), sigma).astype(np.float32) + 1.0
+    flat = cv2.normalize(gray.astype(np.float32) / blur, None, 0, 255, cv2.NORM_MINMAX)
+    out.append(clahe.apply(flat.astype(np.uint8)))
+    # 4. local adaptive threshold — robust to uneven lighting / specular glare
+    bs = max(11, (gray.shape[0] // 2) | 1)
+    out.append(cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                     cv2.THRESH_BINARY, bs, 9))
+    # 5. glare-clipped — pull specular highlights down to the 95th percentile,
+    #    then stretch contrast so text under near-saturation reappears
+    cap = max(1, int(np.percentile(gray, 95)))
+    clipped = cv2.normalize(np.clip(gray, 0, cap), None, 0, 255, cv2.NORM_MINMAX)
+    out.append(clahe.apply(clipped.astype(np.uint8)))
+    # 6. background-flattened black-hat — dark print on a busy/textured background
     ksize = max(9, (gray.shape[0] // 3) | 1)
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ksize, ksize))
     blackhat = cv2.morphologyEx(gray, cv2.MORPH_BLACKHAT, kernel)
-    flat = cv2.subtract(255, cv2.normalize(blackhat, None, 0, 255, cv2.NORM_MINMAX))
-    variants.append(flat)
-    return [cv2.cvtColor(v, cv2.COLOR_GRAY2RGB) for v in variants]
+    out.append(cv2.subtract(255, cv2.normalize(blackhat, None, 0, 255, cv2.NORM_MINMAX)))
+    return [cv2.cvtColor(np.asarray(v, dtype=np.uint8), cv2.COLOR_GRAY2RGB) for v in out]
 
 
-def recognize(roi_image) -> tuple[str, float]:
+def recognize(roi_image, accept=None) -> tuple[str, float]:
     """Return (text, mean_confidence) for a cropped ROI.
 
-    Tries several preprocessing variants (contrast / denoise / background-flatten)
-    and keeps the best read — robust across foil, security-mesh and faint dates.
-    Recognition-only on the whole crop first (fixed single-line ROIs are the
-    norm); a confident read short-circuits; otherwise a detector pass is added."""
+    `accept(text) -> bool` (optional) marks a read as the expected one (used for
+    VERIFICATION, where we know what the field should say). When given, every
+    transform is tried until the text resolves through glare/reflection and a
+    confident accepted read wins — a transform can't fabricate a match, so this
+    is safe. Without it (pure reading) the proven primary read is kept and the
+    extra transforms only act as a last resort when nothing was read."""
     engine = _engine()
     variants = _prepare_variants(roi_image)
     primary = variants[0] if variants else _pad(roi_image, 6)
-    # primary path (contrast-normalised) — proven for clean print; short-circuit
     text, score = _run_rec_only(engine, primary)
-    if score >= 0.85 and len(text.replace(" ", "")) >= 2:
+    if score >= 0.85 and len(text.replace(" ", "")) >= 2 and (accept is None or accept(text)):
         return text, score
     best = (text, score)
     try:  # a detector pass on the primary (multi-line / loose boxes)
@@ -257,12 +276,29 @@ def recognize(roi_image) -> tuple[str, float]:
             best = (t2, s2)
     except Exception:
         pass
-    # If the primary path read anything usable, keep it — never let a noisy
-    # cleanup variant override a real read (length-weighted metric is unsafe here).
+
+    if accept is not None:
+        # verification: the primary already reads the expected → done
+        if accept(best[0]) and best[1] >= 0.5:
+            return best
+        # otherwise try every transform; collect confident reads that match the
+        # expected and return the most confident one (glare often clears in only
+        # one representation). Never below a confidence floor, so noise can't pass.
+        accepted = [best] if (accept(best[0]) and best[1] >= 0.4) else []
+        for image in variants[1:]:
+            t, s = _run_rec_only(engine, image)
+            if t and s >= 0.4 and accept(t):
+                accepted.append((t, s))
+        if accepted:
+            return max(accepted, key=lambda c: c[1])
+        # nothing matched — return the plain primary read so it stays "weak" and
+        # the tool's orientation search still fires (a fat garbage read would not)
+        return text, score
+
+    # pure reading: keep a usable primary read; only if nothing was read fall back
+    # to the cleanup/glare transforms (never override a real read).
     if len(best[0].replace(" ", "")) >= 2:
         return best
-    # primary read nothing — the print is hard (mesh/foil/faint). Last resort:
-    # the denoise / background-flatten variants, accepting only a real read.
     for image in variants[1:]:
         t, s = _run_rec_only(engine, image)
         if len(t.replace(" ", "")) >= 2 and _metric(t, s) > _metric(*best):
@@ -319,15 +355,25 @@ class OcrTextTool(InspectionTool):
         # (Rotate image) or set an explicit Rotation.
         weak = (not text) or (len(text.replace(" ", "")) < 3) or (score < 0.4)
         if not rotation and weak:
+            key_expected = _match_key(self.config.get("expected") or "")
+
+            def _matches(t):  # does this read contain the expected value?
+                return bool(key_expected) and key_expected in _match_key(_normalize(t, self.config))
 
             def _metric(t, s):
                 return len(t.replace(" ", "")) * max(s, 0.01)
 
-            best_text, best_score, best = text, score, _metric(text, score)
+            best_text, best_score = text, score
             for extra in (90, 180, 270):
                 t2, s2 = reader(rotate_image(roi, extra), self.config)
-                if _metric(t2, s2) > best:
-                    best_text, best_score, best = t2, s2, _metric(t2, s2)
+                # prefer an orientation whose read MATCHES the expected value;
+                # among equal matches fall back to the length-weighted metric
+                better = (_matches(t2) and not _matches(best_text)) or (
+                    _matches(t2) == _matches(best_text)
+                    and _metric(t2, s2) > _metric(best_text, best_score)
+                )
+                if better:
+                    best_text, best_score = t2, s2
             text, score = best_text, best_score
         # `measured` is the raw read shown to the operator (keeps punctuation);
         # matching is done on alphanumeric keys so a '.'/',' OCR slip, a missing

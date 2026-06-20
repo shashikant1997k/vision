@@ -949,10 +949,8 @@ class MainWindow(QMainWindow):
         self._review_window.show()
 
     def open_teach(self) -> None:
-        """Acquire a set of product images from the line, then open Teach on them
-        (pick the reference from the filmstrip and mark ROIs on a real product)."""
-
-        images = []
+        """Open the live Teach screen on the camera: position the product, Snap to
+        freeze a reference, then mark up ROIs (industry-standard live teach)."""
         try:
             source = self._camera_factory(self._camera_id, None, self._recipe)
         except Exception as exc:
@@ -961,45 +959,52 @@ class MainWindow(QMainWindow):
                 "and close other camera windows first."
             )
             return
-        # Teach must work regardless of trigger config: force free-run so the
-        # camera yields frames at the bench (a hardware trigger gives none).
+        # Force free-run so the camera yields frames at the bench regardless of a
+        # configured hardware trigger.
         self._force_free_run(source)
         import time
 
         from PySide6.QtWidgets import QApplication
 
-        self.statusBar().showMessage("Acquiring reference images for teaching…")
-        # Time-bounded: never wait forever (e.g. a hardware-trigger line sitting
-        # idle yields no frames). Grab up to 30 images or 8 seconds, whichever
-        # comes first, pumping the event loop so the UI stays responsive.
         grab = getattr(source, "grab", None)
-        deadline = time.monotonic() + 8.0
-        if callable(grab):
-            while len(images) < 30 and time.monotonic() < deadline:
+
+        def _grab_one():
+            if callable(grab):
                 try:
-                    frame = grab(timeout=0.5)
+                    f = grab(timeout=0.3)
                 except TypeError:
-                    frame = grab()
-                if frame is not None:
-                    images.append(frame.image)
-                self.statusBar().showMessage(f"Acquiring reference images… {len(images)}/30")
-                QApplication.processEvents()
-        else:  # cameras that only expose frames() (e.g. the simulator)
-            for frame in source.frames():
-                images.append(frame.image)
-                if len(images) % 5 == 0:
-                    self.statusBar().showMessage(f"Acquiring reference images… {len(images)}/30")
-                    QApplication.processEvents()
-                if len(images) >= 30:
-                    break
-        close = getattr(source, "close", None)
-        if callable(close):
-            close()
-        if not images:
-            self.statusBar().showMessage("Could not acquire reference images")
+                    f = grab()
+            else:
+                f = next(source.frames(), None)
+            return f.image if f is not None else None
+
+        # seed one frame so the Teach window has an initial reference
+        self.statusBar().showMessage("Opening live teach…")
+        seed = None
+        deadline = time.monotonic() + 5.0
+        while seed is None and time.monotonic() < deadline:
+            seed = _grab_one()
+            QApplication.processEvents()
+        if seed is None:
+            close = getattr(source, "close", None)
+            if callable(close):
+                close()
+            self.statusBar().showMessage("Could not acquire from the camera for Teach")
             return
-        self.statusBar().showMessage(f"Acquired {len(images)} images for teaching")
-        self._open_teach_with_images(images)
+
+        def provider():
+            try:
+                return _grab_one()
+            except Exception:
+                return None
+
+        def on_close():
+            close = getattr(source, "close", None)
+            if callable(close):
+                close()
+
+        self.statusBar().showMessage("Live teach — position the product, then Snap.")
+        self._open_teach_with_images([seed], image_provider=provider, on_close=on_close)
 
     def open_teach_from_files(self) -> None:
         """Load product images from disk and teach on them (your own samples)."""
@@ -1061,7 +1066,7 @@ class MainWindow(QMainWindow):
             attr="_emulate_task",
         )
 
-    def _open_teach_with_images(self, images) -> None:
+    def _open_teach_with_images(self, images, image_provider=None, on_close=None) -> None:
         from .teach_window import TeachWindow
 
         lanes = sorted({region.reject_output for region in self._recipe.regions})
@@ -1071,6 +1076,8 @@ class MainWindow(QMainWindow):
             reference_images=images,
             session_factory=self._sf,
             reject_lanes=lanes,
+            image_provider=image_provider,
+            on_close=on_close,
         )
         self._teach_window.resize(1040, 600)
         self._teach_window.show()

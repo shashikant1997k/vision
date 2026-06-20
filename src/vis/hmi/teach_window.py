@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
     QApplication,
@@ -93,6 +93,8 @@ class TeachWindow(QMainWindow):
         product: str = "New Product",
         recipe_id: str = "recipe",
         reject_lanes: list[str] | None = None,
+        image_provider=None,
+        on_close=None,
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -112,6 +114,14 @@ class TeachWindow(QMainWindow):
         self._loading = False
         self._worker = None  # background Test/Test-all thread, when running
         self._pending_done = None
+        # live-camera teaching: stream frames, Snap to freeze a reference to mark up
+        self._image_provider = image_provider
+        self._on_close = on_close
+        self._live_frame = None
+        self._live = False
+        self._live_timer = QTimer(self)
+        self._live_timer.setInterval(120)
+        self._live_timer.timeout.connect(self._live_tick)
 
         h, w = reference_image.shape[:2]
         # Start with one product covering the whole image (the common single-
@@ -153,6 +163,13 @@ class TeachWindow(QMainWindow):
         self._test_all_btn = test_all_btn = QPushButton("Test all")
         test_all_btn.setToolTip("Run the recipe over all captured/loaded images.")
         test_all_btn.clicked.connect(self._test_all)
+        self._live_btn = QPushButton("● Live")
+        self._live_btn.setToolTip("Resume the live camera to reposition the product.")
+        self._live_btn.clicked.connect(self._go_live)
+        self._snap_btn = QPushButton("◉ Snap")
+        self._snap_btn.setProperty("variant", "primary")
+        self._snap_btn.setToolTip("Freeze the current live frame to draw inspection boxes on.")
+        self._snap_btn.clicked.connect(self._snap)
         film = QHBoxLayout()
         film.addWidget(prev_btn)
         film.addWidget(self._img_label)
@@ -163,6 +180,8 @@ class TeachWindow(QMainWindow):
         film.addWidget(zoom_in)
         film.addWidget(fit_btn)
         film.addStretch(1)
+        film.addWidget(self._live_btn)
+        film.addWidget(self._snap_btn)
         film.addWidget(test_all_btn)
         film_widget = QWidget()
         film_widget.setLayout(film)
@@ -308,6 +327,11 @@ class TeachWindow(QMainWindow):
         self._set_guide("Click <b>Read Code</b> or <b>Read Text</b>, then drag a box on the image.")
         self._update_img_label()
         self._refresh_view()
+        if self._image_provider is not None:
+            self._go_live()  # start in live mode: position the product, then Snap
+        else:
+            self._live_btn.hide()
+            self._snap_btn.hide()
 
     def keyPressEvent(self, event) -> None:
         if event.key() == Qt.Key_Escape:
@@ -1068,6 +1092,38 @@ class TeachWindow(QMainWindow):
     def _set_guide(self, text: str) -> None:
         self._guide.setText(text)
 
+    # ---- live camera teaching --------------------------------------------
+    def _live_tick(self) -> None:
+        frame = self._image_provider() if self._image_provider is not None else None
+        if frame is not None:
+            self._live_frame = frame
+            self._image.setImage(frame)  # raw live frame, no ROI overlay
+
+    def _go_live(self) -> None:
+        if self._image_provider is None:
+            return
+        self._live = True
+        self._set_guide(
+            "● LIVE — position the product in view, then click <b>Snap</b> to freeze it."
+        )
+        self._live_timer.start()
+
+    def _snap(self) -> None:
+        if not self._live:
+            return
+        self._live_timer.stop()
+        self._live = False
+        if self._live_frame is not None:
+            self._reference = self._live_frame
+            self._bank[self._reference_index] = self._live_frame
+            self._last_results = None
+            self._image.reset_view()
+        self._refresh_view()
+        self._set_guide(
+            "Snapped ✓ — pick <b>Read Code</b>/<b>Read Text</b> and drag a box. "
+            "Click <b>Live</b> to reposition."
+        )
+
     # ---- actions ----------------------------------------------------------
     def _test(self) -> None:
         if not any(region.tools for region in self._model.regions):
@@ -1115,6 +1171,13 @@ class TeachWindow(QMainWindow):
         self._test_all_btn.setEnabled(on)
 
     def closeEvent(self, event) -> None:
+        # stop the live feed and release the camera (on_close closes the source)
+        self._live_timer.stop()
+        if self._on_close is not None:
+            try:
+                self._on_close()
+            except Exception:
+                pass
         # Don't let a running background test outlive the window (a QThread
         # destroyed while running crashes). Wait briefly for it to finish.
         worker = self._worker

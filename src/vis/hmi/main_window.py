@@ -286,6 +286,7 @@ class MainWindow(QMainWindow):
         sidebar_widget = QWidget()
         sidebar_widget.setLayout(sidebar)
         sidebar_widget.setFixedWidth(198)
+        self._sidebar_widget = sidebar_widget
 
         # --- right info panel: recipe + live results + totals ---
         info = QVBoxLayout()
@@ -316,13 +317,19 @@ class MainWindow(QMainWindow):
         feed_widget = QWidget()
         feed_widget.setLayout(left)
 
-        # --- header bar: title · camera status · user ---
+        # --- header bar: collapse toggle · title · camera status · user ---
+        self._sidebar_toggle = QPushButton("☰")
+        self._sidebar_toggle.setFixedWidth(40)
+        self._sidebar_toggle.setToolTip("Show/hide the menu (full-width content)")
+        self._sidebar_toggle.clicked.connect(self._toggle_sidebar)
         title = QLabel("Vision Inspection")
         title.setStyleSheet("font-size:16px; font-weight:600")
         user_lbl = QLabel(username)
         user_lbl.setStyleSheet("color:#778")
         header = QHBoxLayout()
         header.setContentsMargins(4, 2, 6, 2)
+        header.addWidget(self._sidebar_toggle)
+        header.addSpacing(8)
         header.addWidget(title)
         header.addSpacing(18)
         header.addWidget(self._cam_status, 1)
@@ -1087,6 +1094,10 @@ class MainWindow(QMainWindow):
                 live(self._free_run_settings())
             except Exception:
                 pass
+
+    def _toggle_sidebar(self) -> None:
+        """Collapse/expand the left menu so the content can go full-width."""
+        self._sidebar_widget.setVisible(not self._sidebar_widget.isVisible())
 
     def _refresh_camera_status(self) -> None:
         """Probe the camera (off the GUI thread) and update the status bar.

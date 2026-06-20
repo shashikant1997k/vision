@@ -1156,7 +1156,7 @@ class MainWindow(QMainWindow):
 
     def _toggle_sidebar(self) -> None:
         """Collapse/expand the left menu so the content can go full-width."""
-        self._sidebar_widget.setVisible(not self._sidebar_widget.isVisible())
+        self._sidebar_widget.setVisible(self._sidebar_widget.isHidden())
 
     # ---- in-place panel navigation (screens shown in the content area) -----
     def _leave_current_panel(self) -> None:
@@ -1193,13 +1193,12 @@ class MainWindow(QMainWindow):
         self._content_stack.setCurrentWidget(central)
         self._current_panel_window = win
         self._current_panel_central = central
-        self._sidebar_widget.setVisible(False)  # full-width content after nav
+        # the sidebar stays as-is; it only collapses via the ☰ toggle
 
     def _navigate_home(self) -> None:
-        """Return to the live inspection view; show the menu again."""
+        """Return to the live inspection view (sidebar state unchanged)."""
         self._leave_current_panel()
         self._content_stack.setCurrentWidget(self._live_page)
-        self._sidebar_widget.setVisible(True)
 
     def _refresh_camera_status(self) -> None:
         """Probe the camera (off the GUI thread) and update the status bar.

@@ -82,15 +82,19 @@ def test_in_place_panel_navigation(tmp_path):
     live = win._live_page
     win.open_admin()
     assert win._content_stack.currentWidget() is not live
-    assert win._sidebar_widget.isHidden()  # auto-collapsed after navigation
+    assert not win._sidebar_widget.isHidden()  # navigation must NOT collapse the menu
     prev = win._current_panel_window
     win.open_comms()  # switching panels replaces the previous one
     assert win._content_stack.currentWidget() is not live
     assert win._current_panel_window is not prev
     win._navigate_home()
     assert win._content_stack.currentWidget() is live
-    assert not win._sidebar_widget.isHidden()
     assert win._current_panel_window is None
+    # the menu collapses ONLY via the toggle
+    win._toggle_sidebar()
+    assert win._sidebar_widget.isHidden()
+    win._toggle_sidebar()
+    assert not win._sidebar_widget.isHidden()
 
 
 def test_consecutive_reject_alarm_stops_the_line(tmp_path):

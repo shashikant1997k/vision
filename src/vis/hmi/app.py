@@ -139,8 +139,11 @@ def main() -> int:
 
     app = QApplication(sys.argv)
     from .theme import apply_theme
+    from .wheel_guard import WheelGuard
 
     apply_theme(app)
+    app._wheel_guard = WheelGuard()  # keep a ref; ignore wheel on unfocused fields
+    app.installEventFilter(app._wheel_guard)
 
     engine = make_engine()
     init_db(engine)

@@ -129,13 +129,38 @@ def _decode(data) -> np.ndarray:
     return cv2.imdecode(arr, cv2.IMREAD_GRAYSCALE)
 
 
+def _feat(glyph):
+    """Matching feature for a normalized glyph. Kept as a plain float view (no
+    blur): blurring lifts a true match but also makes tiny punctuation (./-/,)
+    correlate ~1.0 with any solid blob once `_norm_glyph` scales it up, polluting
+    the confusion gate. Alignment tolerance is handled by `_best_ncc` instead."""
+    return glyph.astype(np.float32)
+
+
 def _ncc(a, b) -> float:
-    a = a.astype(np.float32)
-    b = b.astype(np.float32)
-    a -= a.mean()
-    b -= b.mean()
+    a = a - a.mean()
+    b = b - b.mean()
     denom = float(np.sqrt((a * a).sum()) * np.sqrt((b * b).sum()))
     return float((a * b).sum() / denom) if denom else 0.0
+
+
+def _best_ncc(glyph, tpl, shift=1) -> float:
+    """Shift-tolerant normalized correlation: compare over ±`shift` px offsets
+    (overlap region only) and take the peak, so a 1px segmentation/centring error
+    doesn't tank a true match. Built on `_ncc` rather than cv2.matchTemplate so a
+    degenerate (near-constant) template — e.g. a tiny '.'/'-' scaled up to fill
+    the cell — correctly scores ~0 instead of matchTemplate's spurious 1.0."""
+    h, w = glyph.shape[:2]
+    best = 0.0
+    for dy in range(-shift, shift + 1):
+        for dx in range(-shift, shift + 1):
+            a = glyph[max(0, dy):h + min(0, dy), max(0, dx):w + min(0, dx)]
+            b = tpl[max(0, -dy):h + min(0, -dy), max(0, -dx):w + min(0, -dx)]
+            if a.size:
+                s = _ncc(a, b)
+                if s > best:
+                    best = s
+    return best
 
 
 # ---- font registration + reading -----------------------------------------
@@ -250,16 +275,16 @@ def read_text(image, font, n_chars=None, invert=None, dot_kernel=0, min_area=10,
     if not font:
         return "", 0.0
     templates = _filter_charset(font, charset)
-    templates = {ch: [_decode(t) for t in tpls] for ch, tpls in templates.items()}
+    templates = {ch: [_feat(_decode(t)) for t in tpls] for ch, tpls in templates.items()}
     binary = _prepare_binary(_gray(image), invert, dot_kernel)
     out = []
     scores = []
     for box in _split_boxes(binary, n_chars, min_area):
-        glyph = _norm_glyph(binary, box)
+        glyph = _feat(_norm_glyph(binary, box))
         best_ch, best_s = "?", -1.0
         for ch, tpls in templates.items():
             for tpl in tpls:
-                s = _ncc(glyph, tpl)
+                s = _best_ncc(glyph, tpl)
                 if s > best_s:
                     best_s, best_ch = s, ch
         out.append(best_ch if best_s >= min_char_score else "?")
@@ -268,11 +293,15 @@ def read_text(image, font, n_chars=None, invert=None, dot_kernel=0, min_area=10,
 
 
 def verify_text(image, font, expected, invert=None, dot_kernel=0, min_char_score=0.5,
-                margin=0.05):
+                margin=0.0, charset=None):
     """OCV verification: split the print into len(expected) characters and score
     each position against the EXPECTED character's templates only. Returns
     (readback, mean_score, char_scores) where readback shows the expected char
-    where it verified and '?' where it didn't."""
+    where it verified and '?' where it didn't.
+
+    `charset` constrains the confusion check to the field's lexicon (vendor
+    practice): a digits-only date excludes shape-twins like O/Q so a true '0'
+    is not false-rejected for resembling the letter 'O'."""
     chars = [c for c in expected.upper() if not c.isspace()]
     if not chars or not font:
         return "", 0.0, []
@@ -280,20 +309,24 @@ def verify_text(image, font, expected, invert=None, dot_kernel=0, min_char_score
     boxes = _segment_to_count(binary, len(chars))
     if len(boxes) != len(chars):
         return "", 0.0, [0.0] * len(chars)
-    templates = {ch: [_decode(t) for t in tpls] for ch, tpls in font.items()}
+    font = _filter_charset(font, charset)
+    templates = {ch: [_feat(_decode(t)) for t in tpls] for ch, tpls in font.items()}
     readback = []
     scores = []
     for ch, box in zip(chars, boxes):
-        glyph = _norm_glyph(binary, box)
-        best = max((_ncc(glyph, tpl) for tpl in templates.get(ch, [])), default=0.0)
-        # OCVMax-style confusion gate: the expected character must also BEAT the
-        # best-scoring OTHER character by `margin` (top-1 minus top-2) — catches
-        # a misprint that resembles the expected glyph but matches another more.
+        glyph = _feat(_norm_glyph(binary, box))
+        best = max((_best_ncc(glyph, tpl) for tpl in templates.get(ch, [])), default=0.0)
+        # OCVMax-style confusion gate: the expected character must be the TOP
+        # match (>= every other character by `margin`, default 0) — a misprint of
+        # a *distinguishable* character makes that other character win outright
+        # and fails here. A positive margin only false-rejects shape-twins
+        # (0/O, 1/I, 5/S) on good print, so the lexicon (charset) is the right
+        # place to separate those, not an absolute score gap.
         best_other = 0.0
         for other, tpls in templates.items():
             if other == ch:
                 continue
-            score_other = max((_ncc(glyph, tpl) for tpl in tpls), default=0.0)
+            score_other = max((_best_ncc(glyph, tpl) for tpl in tpls), default=0.0)
             best_other = max(best_other, score_other)
         ok = best >= min_char_score and (best - best_other) >= margin
         scores.append(max(0.0, best))
@@ -328,7 +361,8 @@ class FontOcvTool(InspectionTool):
                 invert=cfg.get("invert"),
                 dot_kernel=cfg.get("dot_kernel", 0),
                 min_char_score=cfg.get("min_char_score", 0.5),
-                margin=cfg.get("char_margin", 0.05),
+                margin=cfg.get("char_margin", 0.0),
+                charset=cfg.get("charset"),
             )
         else:
             text, score = read_text(

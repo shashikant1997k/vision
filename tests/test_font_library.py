@@ -189,9 +189,9 @@ def test_ocv_verify_mode_scores_against_expected(tmp_path):
     result = bad.inspect(image)
     assert not result.passed
     assert result.measured_value[2] == "?"          # the wrong position flagged
-    # gated by accept threshold + the top-1-minus-top-2 margin (the printed '2'
-    # matches '2' better than the expected '7')
-    assert result.detail["char_scores"][2] <= 0.55
+    # gated by the top-1 confusion margin (the printed '2' matches '2' better than
+    # the expected '7'); the mismatch score stays well below a genuine match (~0.8+)
+    assert result.detail["char_scores"][2] <= 0.6
 
 
 def test_margin_gate_rejects_lookalike_of_another_char():

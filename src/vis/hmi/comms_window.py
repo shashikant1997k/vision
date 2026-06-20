@@ -160,7 +160,6 @@ class CommsWindow(QMainWindow):
             ("ready", "READY output"), ("running", "RUNNING output"),
             ("pass_pulse", "PASS pulse output"), ("reject_pulse", "REJECT pulse output"),
             ("alarm", "ALARM output"), ("heartbeat", "HEARTBEAT output"),
-            ("conveyor", "CONVEYOR output"),
         ):
             spin = QSpinBox()
             spin.setRange(0, 256)

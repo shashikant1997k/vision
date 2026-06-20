@@ -124,7 +124,7 @@ class MainWindow(QMainWindow):
         for cid in self._camera_ids:
             lbl = QLabel("No camera running")
             lbl.setAlignment(Qt.AlignCenter)
-            lbl.setMinimumSize(560, 340)
+            lbl.setMinimumSize(480, 260)  # keep the live page short enough for laptop screens
             lbl.setStyleSheet("background:#111; color:#888")
             self._cam_images[cid] = lbl
             self._cam_tabs.addTab(lbl, cid)
@@ -180,13 +180,6 @@ class MainWindow(QMainWindow):
         self._start.setProperty("variant", "primary")
         self._stop = QPushButton("■  Stop")
         self._stop.setProperty("variant", "danger")
-        self._conveyor_btn = QPushButton("Conveyor ON")
-        self._conveyor_btn.setCheckable(True)
-        self._conveyor_btn.setToolTip("Run/stop the conveyor output (needs a CONVEYOR channel wired in Comms).")
-        self._conveyor_btn.toggled.connect(self._toggle_conveyor)
-        self._ack_btn = QPushButton("Error Ack")
-        self._ack_btn.setToolTip("Acknowledge a line-stop alarm: clear the ALARM output and reject streak.")
-        self._ack_btn.clicked.connect(self._error_ack)
         self._teach = QPushButton("Teach…")
         self._teach_files = QPushButton("Teach on images…")
         self._emulate = QPushButton("Emulate folder…")
@@ -321,8 +314,6 @@ class MainWindow(QMainWindow):
         sidebar.addWidget(_section_label("RUN"))
         sidebar.addWidget(self._start)
         sidebar.addWidget(self._stop)
-        sidebar.addWidget(self._conveyor_btn)
-        sidebar.addWidget(self._ack_btn)
         for w in (self._batches_btn, self._challenge, self._review, self._events_btn):
             sidebar.addWidget(w)
         sidebar.addWidget(_section("BUILD RECIPE", build_btns))
@@ -332,9 +323,18 @@ class MainWindow(QMainWindow):
         for w in system_btns:
             sidebar.addWidget(w)
         sidebar.addStretch(1)
-        sidebar_widget = QWidget()
-        sidebar_widget.setLayout(sidebar)
-        sidebar_widget.setFixedWidth(198)
+        sidebar_inner = QWidget()
+        sidebar_inner.setLayout(sidebar)
+        # scroll the sidebar so its many buttons never force the window taller
+        # than the screen on a short display
+        from PySide6.QtWidgets import QScrollArea
+
+        sidebar_widget = QScrollArea()
+        sidebar_widget.setWidgetResizable(True)
+        sidebar_widget.setFrameShape(QScrollArea.NoFrame)
+        sidebar_widget.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        sidebar_widget.setWidget(sidebar_inner)
+        sidebar_widget.setFixedWidth(210)
         self._sidebar_widget = sidebar_widget
 
         # --- right info panel: recipe + live results + totals ---
@@ -920,28 +920,6 @@ class MainWindow(QMainWindow):
         self._state.setText(f"● {text}")
         self._state.setStyleSheet(f"color:{color}; font-weight:bold")
 
-    def _toggle_conveyor(self, on: bool) -> None:
-        self._conveyor_btn.setText("Conveyor OFF" if on else "Conveyor ON")
-        if self._signals is not None:
-            self._signals.set_conveyor(on)
-            self._log_event("info", "line", f"Conveyor {'ON' if on else 'OFF'} by operator")
-        else:
-            self.statusBar().showMessage(
-                "No CONVEYOR output wired — set its channel in Comms to drive the conveyor."
-            )
-
-    def _error_ack(self) -> None:
-        """Acknowledge a line-stop alarm: clear the ALARM output, reset the
-        consecutive-reject streak and return the state to Idle so the line can
-        be restarted after the operator has fixed the cause."""
-        if self._signals is not None:
-            self._signals.reset_alarm()
-        self._stats.reset_consecutive()
-        if "ALARM" in self._state.text():
-            self._set_state("Idle", "#888")
-        self.statusBar().showMessage("Alarm acknowledged.")
-        self._log_event("info", "line", "Alarm acknowledged by operator")
-
     def close_batch(self) -> None:
         if self._batch_id is None or self._sf is None:
             return
@@ -1368,6 +1346,15 @@ class MainWindow(QMainWindow):
         central = win.centralWidget() if hasattr(win, "centralWidget") else None
         if central is None:
             central = win
+        # Every embedded panel must scroll within the available height so a tall
+        # screen never pushes its bottom Apply/Save button off-screen. Panels that
+        # already wrap themselves in a scroll area are left as-is.
+        from PySide6.QtWidgets import QScrollArea
+
+        if not isinstance(central, QScrollArea):
+            from .scrollable import scroll_wrap
+
+            central = scroll_wrap(central)
         self._content_stack.addWidget(central)
         self._content_stack.setCurrentWidget(central)
         self._current_panel_window = win

@@ -1150,6 +1150,7 @@ class TeachWindow(QMainWindow):
     def _run_async(self, fn, on_done, busy_message: str) -> None:
         if self._worker is not None and self._worker.isRunning():
             return  # a test is already running; ignore repeat clicks
+        QApplication.setOverrideCursor(Qt.BusyCursor)  # loader while testing
         self._pending_done = on_done
         self._status.setText(busy_message)
         self._set_test_enabled(False)
@@ -1160,6 +1161,7 @@ class TeachWindow(QMainWindow):
         worker.start()
 
     def _on_async_done(self, result) -> None:
+        QApplication.restoreOverrideCursor()
         cb, self._pending_done = self._pending_done, None
         self._worker = None
         self._set_test_enabled(True)
@@ -1167,6 +1169,7 @@ class TeachWindow(QMainWindow):
             cb(result)
 
     def _on_async_failed(self, message: str) -> None:
+        QApplication.restoreOverrideCursor()
         self._pending_done = None
         self._worker = None
         self._set_test_enabled(True)

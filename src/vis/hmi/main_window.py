@@ -1180,12 +1180,18 @@ class MainWindow(QMainWindow):
     def _show_panel(self, builder) -> None:
         """Build a screen (a QMainWindow) and show its content in place instead
         of as a pop-up window; auto-collapse the sidebar for full-width."""
+        from PySide6.QtWidgets import QApplication
+
         self._leave_current_panel()
+        QApplication.setOverrideCursor(Qt.BusyCursor)  # loader while the screen builds
+        QApplication.processEvents()
         try:
             win = builder()
         except Exception as exc:
+            QApplication.restoreOverrideCursor()
             self.statusBar().showMessage(f"Could not open: {exc}")
             return
+        QApplication.restoreOverrideCursor()
         central = win.centralWidget() if hasattr(win, "centralWidget") else None
         if central is None:
             central = win

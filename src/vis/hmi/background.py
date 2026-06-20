@@ -10,7 +10,8 @@ the on_done/on_error callbacks can touch widgets safely.
 
 from __future__ import annotations
 
-from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtWidgets import QApplication
 
 
 class BackgroundTask(QThread):
@@ -35,13 +36,16 @@ def run_in_background(owner, fn, on_done, on_error=None, *, attr="_bg_task"):
     existing = getattr(owner, attr, None)
     if existing is not None and existing.isRunning():
         return None  # a task is already running on this slot
+    QApplication.setOverrideCursor(Qt.BusyCursor)  # loader: click registered, working
     task = BackgroundTask(fn, owner)
 
     def _finish_done(result):
+        QApplication.restoreOverrideCursor()
         setattr(owner, attr, None)
         on_done(result)
 
     def _finish_failed(msg):
+        QApplication.restoreOverrideCursor()
         setattr(owner, attr, None)
         if on_error is not None:
             on_error(msg)

@@ -524,6 +524,9 @@ class MainWindow(QMainWindow):
     def start(self) -> None:
         if self._runner is not None:
             return
+        # leave any open screen first — this releases a Teach/Camera-setup camera
+        # so Start never collides with it — and shows the live view
+        self._navigate_home()
         from ..runtime.resolve import resolve_batch_fields
 
         bus = EventBus()
@@ -1295,8 +1298,16 @@ class MainWindow(QMainWindow):
         self._content_stack.setCurrentWidget(self._live_page)
 
     def _refresh_camera_status(self) -> None:
-        """Probe the camera (off the GUI thread) and update the status bar.
-        While inspection runs we don't open the device (it's in use)."""
+        """Update the camera status bar. While inspection runs we must NOT touch
+        the device — a second discovery can disrupt the live stream or falsely
+        report 'no camera', so we show the last known status marked (running)."""
+        if self._runner is not None:
+            cached = dict(getattr(self, "_last_camera_status", None)
+                          or {"mode": "gige", "connected": True, "summary": "camera in use"})
+            cached["busy"] = True
+            cached.pop("trigger", None)
+            self._show_camera_status(cached)
+            return
         import os
 
         from ..camera.status import probe_camera_status
@@ -1304,12 +1315,11 @@ class MainWindow(QMainWindow):
 
         cti = os.environ.get("VIS_GENTL_CTI")
         sim = self._simulation
-        running = self._runner is not None
         self._cam_status.setText("Camera: checking…")
         self._cam_status.setStyleSheet("color:#888; font-weight:bold")
         run_in_background(
             self,
-            lambda: probe_camera_status(sim, cti, read_live=not running),
+            lambda: probe_camera_status(sim, cti, read_live=True),
             self._show_camera_status,
             lambda msg: self._show_camera_status(
                 {"mode": "gige", "connected": False, "summary": msg}
@@ -1318,6 +1328,8 @@ class MainWindow(QMainWindow):
         )
 
     def _show_camera_status(self, st: dict) -> None:
+        if st.get("connected") and not st.get("busy"):
+            self._last_camera_status = st  # remember the last good idle status
         mode = st.get("mode")
         if mode == "simulator":
             icon, color = "⚠", "#b8860b"

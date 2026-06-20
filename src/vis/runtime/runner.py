@@ -53,7 +53,11 @@ class InspectionRunner:
             for frame in camera.frames():
                 if self._stop.is_set():
                     break
-                results = pipeline.process_frame(frame)
+                self.live_view.update(frame, [])  # show the fresh frame at once
+                try:
+                    results = pipeline.process_frame(frame)
+                except Exception:
+                    continue  # a bad frame / read error must never stop the line
                 self.live_view.update(frame, results)
                 any_failed = False
                 for r in results:

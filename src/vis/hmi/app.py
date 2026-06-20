@@ -137,6 +137,13 @@ def main() -> int:
     from .login import LoginDialog
     from .main_window import MainWindow
 
+    # make the camera config persistent: env vars win and are remembered;
+    # otherwise the last-saved camera/producer is loaded — so plain `vis-hmi`
+    # finds the camera without needing VIS_CAMERA/VIS_GENTL_CTI each launch.
+    from ..camera.camera_config import apply_camera_config
+
+    apply_camera_config()
+
     app = QApplication(sys.argv)
     from .theme import apply_theme
     from .wheel_guard import WheelGuard

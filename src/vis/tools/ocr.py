@@ -13,11 +13,13 @@ throughput optimisation.
 from __future__ import annotations
 
 import re
+import threading
 
 from .base import InspectionTool, ToolResult
 from .registry import register
 
 _ENGINE = None
+_ENGINE_LOCK = threading.Lock()  # guard one-time build (warm-up + test threads race)
 
 
 def _default_model_dir():
@@ -42,7 +44,11 @@ def _engine():
     accurate than the bundled PP-OCRv3 mobile); falls back to the bundled model.
     Override per-file with VIS_OCR_DET_MODEL / VIS_OCR_REC_MODEL / VIS_OCR_CLS_MODEL."""
     global _ENGINE
-    if _ENGINE is None:
+    if _ENGINE is not None:
+        return _ENGINE
+    with _ENGINE_LOCK:
+        if _ENGINE is not None:  # built while we waited for the lock
+            return _ENGINE
         import os
 
         try:
@@ -76,6 +82,17 @@ def _engine():
         except Exception:  # pragma: no cover - bad override path
             _ENGINE = RapidOCR()
     return _ENGINE
+
+
+def warm_up() -> bool:
+    """Pre-load the OCR engine off the hot path (call from a background thread
+    when Teach/Run opens) so the operator's first read isn't delayed by the
+    one-time model load. Returns True if the engine is ready."""
+    try:
+        _engine()
+        return True
+    except Exception:
+        return False
 
 
 def _pad(image, border: int):
@@ -175,16 +192,35 @@ def _reading_order(result):
 def _run_rec_only(engine, image) -> tuple[str, float]:
     """Recognition directly on the whole crop (no detector) — the right primary
     path for a fixed, operator-drawn single-line ROI: faster, and immune to the
-    detector fragmenting a tight crop into partial reads."""
+    detector fragmenting a tight crop into partial reads.
+
+    NB: in rapidocr 1.2.x, ``engine(img, use_det=False)`` is IGNORED and still
+    runs the detector (which splits a clean single line into pieces like
+    'TE 12 34 45'). Calling the recogniser module directly is true rec-only and
+    reads the whole line as one string at much higher confidence."""
+    import numpy as np
+
+    arr = np.asarray(image)
+    rec = getattr(engine, "text_recognizer", None)
+    if rec is not None:
+        try:
+            out = rec([arr])
+            results = out[0] if isinstance(out, tuple) else out
+            if not results:
+                return "", 0.0
+            texts = [str(r[0]) for r in results]
+            scores = [float(r[1]) for r in results]
+            return " ".join(texts).strip(), (sum(scores) / len(scores))
+        except Exception:
+            pass  # fall back to the unified API below
     try:
-        result, _ = engine(image, use_det=False, use_rec=True)
+        result, _ = engine(arr, use_det=False, use_rec=True)
     except Exception:
         return "", 0.0
     if not result:
         return "", 0.0
-    # rapidocr's rec-only items are [text, score] (2-tuple); some versions
-    # carry a leading box as [box, text, score]. The score is always last and
-    # the text immediately precedes it — index from the end to support both.
+    # unified-API items: [text, score] (2-tuple) or [box, text, score] — the
+    # score is last and the text immediately precedes it (index from the end).
     texts = [str(item[-2]) for item in result]
     scores = [float(item[-1]) for item in result]
     return " ".join(texts).strip(), (sum(scores) / len(scores))
@@ -205,53 +241,61 @@ def _metric(text: str, score: float) -> float:
     return len(text.replace(" ", "")) * max(score, 0.01)
 
 
-def _prepare_variants(image) -> list:
-    """Several preprocessed RGB variants of an ROI — the reader OCRs each and keeps
-    the read that resolves. Industrial OCV (Cognex/Keyence) reads by transforming
-    the crop into whichever representation makes the text fully visible; no single
-    filter wins across glare/foil/security-mesh/faint print, so we offer a panel:
-    contrast-normalised, denoised, illumination-flattened, locally-thresholded,
-    glare-clipped and background-flattened. Variant 0 is the proven default."""
-    import numpy as np
+def _gray_base(image):
+    """Padded, grayscale, upscaled base shared by every transform variant."""
+    import cv2
 
-    arr = _pad(image, 6)
-    try:
-        import cv2
-    except Exception:
-        return [arr]
-    gray = cv2.cvtColor(arr, cv2.COLOR_RGB2GRAY)
+    gray = cv2.cvtColor(_pad(image, 6), cv2.COLOR_RGB2GRAY)
     h = gray.shape[0]
     target = 140  # PP-OCR reads small text far better enlarged to ~this height
     if 0 < h < target:
         factor = min(4.0, target / h)
         gray = cv2.resize(gray, None, fx=factor, fy=factor, interpolation=cv2.INTER_CUBIC)
+    return gray
+
+
+def _extra_variants(image) -> list:
+    """The heavy fallback transforms (computed ONLY when the primary read fails,
+    to keep a good read fast). Industrial OCV reads by transforming the crop into
+    whichever representation makes the text visible; no single filter wins across
+    glare/foil/security-mesh/faint print: denoised, illumination-flattened,
+    locally-thresholded, glare-clipped and background-flattened."""
+    import numpy as np
+
+    try:
+        import cv2
+    except Exception:
+        return []
+    gray = _gray_base(image)
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
     out = []
-    # 1. contrast-normalised — proven default for clean print
-    out.append(clahe.apply(gray) if gray.std() < 55 else gray)
-    # 2. edge-preserving denoise + normalise — security-mesh / speckle
+    # edge-preserving denoise + normalise — security-mesh / speckle
     out.append(clahe.apply(cv2.bilateralFilter(gray, 7, 60, 60)))
-    # 3. illumination-flattened — divide by a large blur to even out glare/foil
-    #    gradients and specular fall-off (flat-field / homomorphic style)
+    # illumination-flattened — divide by a large blur to even out glare/foil
     sigma = max(3.0, gray.shape[0] / 3.0)
     blur = cv2.GaussianBlur(gray, (0, 0), sigma).astype(np.float32) + 1.0
     flat = cv2.normalize(gray.astype(np.float32) / blur, None, 0, 255, cv2.NORM_MINMAX)
     out.append(clahe.apply(flat.astype(np.uint8)))
-    # 4. local adaptive threshold — robust to uneven lighting / specular glare
+    # local adaptive threshold — robust to uneven lighting / specular glare
     bs = max(11, (gray.shape[0] // 2) | 1)
     out.append(cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
                                      cv2.THRESH_BINARY, bs, 9))
-    # 5. glare-clipped — pull specular highlights down to the 95th percentile,
-    #    then stretch contrast so text under near-saturation reappears
+    # glare-clipped — pull specular highlights down to the 95th percentile
     cap = max(1, int(np.percentile(gray, 95)))
     clipped = cv2.normalize(np.clip(gray, 0, cap), None, 0, 255, cv2.NORM_MINMAX)
     out.append(clahe.apply(clipped.astype(np.uint8)))
-    # 6. background-flattened black-hat — dark print on a busy/textured background
+    # background-flattened black-hat — dark print on a busy/textured background
     ksize = max(9, (gray.shape[0] // 3) | 1)
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ksize, ksize))
     blackhat = cv2.morphologyEx(gray, cv2.MORPH_BLACKHAT, kernel)
     out.append(cv2.subtract(255, cv2.normalize(blackhat, None, 0, 255, cv2.NORM_MINMAX)))
     return [cv2.cvtColor(np.asarray(v, dtype=np.uint8), cv2.COLOR_GRAY2RGB) for v in out]
+
+
+def _prepare_variants(image) -> list:
+    """All variants (primary + heavy fallbacks). Kept for completeness; the hot
+    path uses _prepare + _extra_variants so the fallbacks aren't built on a good read."""
+    return [_prepare(image), *_extra_variants(image)]
 
 
 def recognize(roi_image, accept=None) -> tuple[str, float]:
@@ -264,8 +308,7 @@ def recognize(roi_image, accept=None) -> tuple[str, float]:
     is safe. Without it (pure reading) the proven primary read is kept and the
     extra transforms only act as a last resort when nothing was read."""
     engine = _engine()
-    variants = _prepare_variants(roi_image)
-    primary = variants[0] if variants else _pad(roi_image, 6)
+    primary = _prepare(roi_image)  # cheap contrast-normalised variant (the common good case)
     text, score = _run_rec_only(engine, primary)
     if score >= 0.85 and len(text.replace(" ", "")) >= 2 and (accept is None or accept(text)):
         return text, score
@@ -285,7 +328,7 @@ def recognize(roi_image, accept=None) -> tuple[str, float]:
         # expected and return the most confident one (glare often clears in only
         # one representation). Never below a confidence floor, so noise can't pass.
         accepted = [best] if (accept(best[0]) and best[1] >= 0.4) else []
-        for image in variants[1:]:
+        for image in _extra_variants(roi_image):  # heavy fallbacks, built only now
             t, s = _run_rec_only(engine, image)
             if t and s >= 0.4 and accept(t):
                 accepted.append((t, s))
@@ -299,7 +342,7 @@ def recognize(roi_image, accept=None) -> tuple[str, float]:
     # to the cleanup/glare transforms (never override a real read).
     if len(best[0].replace(" ", "")) >= 2:
         return best
-    for image in variants[1:]:
+    for image in _extra_variants(roi_image):  # heavy fallbacks, built only now
         t, s = _run_rec_only(engine, image)
         if len(t.replace(" ", "")) >= 2 and _metric(t, s) > _metric(*best):
             best = (t, s)

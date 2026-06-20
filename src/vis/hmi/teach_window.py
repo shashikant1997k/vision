@@ -339,6 +339,16 @@ class TeachWindow(QMainWindow):
         self._set_guide("Click <b>Read Code</b> or <b>Read Text</b>, then drag a box on the image.")
         self._update_img_label()
         self._refresh_view()
+        # warm the OCR model in the background so the first Test isn't blocked by
+        # the one-time model load (a few seconds otherwise)
+        try:
+            import threading
+
+            from ..tools.ocr import warm_up
+
+            threading.Thread(target=warm_up, daemon=True).start()
+        except Exception:
+            pass
         if self._image_provider is not None:
             self._go_live()  # start in live mode: position the product, then Snap
         else:
@@ -1190,8 +1200,7 @@ class TeachWindow(QMainWindow):
             return
         ref = self._reference
         model = self._model
-        self._run_async(lambda: model.test(ref), self._test_done,
-                        "Testing… (the first run also loads the OCR model — a few seconds)")
+        self._run_async(lambda: model.test(ref), self._test_done, "Testing…")
 
     def _test_done(self, results) -> None:
         self._last_results = results

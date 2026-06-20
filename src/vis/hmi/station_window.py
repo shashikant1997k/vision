@@ -64,6 +64,9 @@ class StationConfigWindow(QMainWindow):
         central = QWidget()
         central.setLayout(root)
         self.setCentralWidget(central)
+        from .scrollable import make_scrollable
+
+        make_scrollable(self)  # never hide controls below the fold
 
         self._reload_stations()
 

@@ -24,6 +24,17 @@ from ..runtime import InspectionRunner, LiveStats, LiveView, draw_overlay
 from .image import numpy_to_qpixmap
 
 
+def _section_label(text: str) -> QLabel:
+    """A small, muted uppercase heading that groups the control panel into
+    clear sections (Recipe / Results / Run / Build / System)."""
+    lbl = QLabel(text)
+    lbl.setStyleSheet(
+        "color:#5b8aa6; font-size:11px; font-weight:bold; "
+        "letter-spacing:1.5px; margin-top:8px"
+    )
+    return lbl
+
+
 class MainWindow(QMainWindow):
     """Live-view screen: annotated camera feed + running counters + start/stop.
 
@@ -121,6 +132,15 @@ class MainWindow(QMainWindow):
             label.setStyleSheet("font-size: 15px; font-weight: bold")
         self._state = QLabel("● Idle")
         self._state.setStyleSheet("color:#888; font-weight:bold")
+
+        # persistent camera status (connection, model, IP, resolution, trigger)
+        self._cam_status = QLabel("Camera: checking…")
+        self._cam_status.setWordWrap(True)
+        self._cam_status.setStyleSheet("color:#888; font-weight:bold")
+        self._cam_refresh = QPushButton("↻")
+        self._cam_refresh.setFixedWidth(38)
+        self._cam_refresh.setToolTip("Re-check the camera connection")
+        self._cam_refresh.clicked.connect(self._refresh_camera_status)
         self._reasons = QLabel("")
         self._reasons.setWordWrap(True)
         self._reasons.setMaximumWidth(360)
@@ -139,6 +159,9 @@ class MainWindow(QMainWindow):
 
         self._results_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self._results_table.setMinimumHeight(120)
+        # single camera → the "Camera" column is redundant; hide it
+        if len(self._camera_ids) == 1:
+            self._results_table.setColumnHidden(0, True)
 
         self._start = QPushButton("▶  Start")
         self._start.setProperty("variant", "primary")
@@ -155,7 +178,7 @@ class MainWindow(QMainWindow):
         self._comms = QPushButton("Comms…")
         self._stations = QPushButton("Stations…")
         self._admin = QPushButton("Admin…")
-        self._settings = QPushButton("Settings…")
+        self._settings = QPushButton("Camera setup…")
         self._stop.setEnabled(False)
         self._start.clicked.connect(self.start)
         self._stop.clicked.connect(self.stop)
@@ -202,30 +225,12 @@ class MainWindow(QMainWindow):
             totals_row.addSpacing(10)
         totals_row.addStretch(1)
 
-        # grouped rows so buttons never get crushed; rows whose buttons are all
-        # role-hidden collapse to nothing (operators see just the run row)
-        buttons = QVBoxLayout()
-        run_row = QHBoxLayout()
-        run_row.addWidget(self._start, 1)
-        run_row.addWidget(self._stop, 1)
-        run_row.addWidget(self._challenge, 1)
-        run_row.addWidget(self._review, 1)
-        run_row.addWidget(self._events_btn, 1)
-        buttons.addLayout(run_row)
-        tools_row = QHBoxLayout()
-        for w in (self._teach, self._teach_files, self._emulate, self._import, self._fonts):
-            tools_row.addWidget(w, 1)
-        buttons.addLayout(tools_row)
-        admin_row = QHBoxLayout()
-        for w in (self._comms, self._stations, self._admin, self._settings):
-            admin_row.addWidget(w, 1)
-        buttons.addLayout(admin_row)
-
+        # --- recipe selector: a single "Recipe" for one camera; per-camera
+        # selectors appear only in multi-camera setups ---
         recipe_row = QHBoxLayout()
         recipe_row.addWidget(self._recipe_combo, 1)
         recipe_row.addWidget(self._reload_btn)
         job_form = QFormLayout()
-        # primary recipe (cam 1); each extra camera gets its own recipe selector
         self._cam_recipe_combos = {self._camera_ids[0]: self._recipe_combo}
         multi = len(self._camera_ids) > 1
         job_form.addRow("Recipe " + (self._camera_ids[0] if multi else ""), recipe_row)
@@ -242,9 +247,46 @@ class MainWindow(QMainWindow):
                     combo.setCurrentIndex(idx)
         job_form.addRow("Batch", self._batch_no)
 
+        # --- action buttons grouped by workflow stage (Setup → Teach → Run) so
+        # the next step is obvious and buttons never get crushed. A section
+        # header hides itself when all its buttons are role-hidden. ---
+        def _btn_row(*widgets):
+            row = QHBoxLayout()
+            for w in widgets:
+                row.addWidget(w, 1)
+            return row
+
+        def _section(title, members):
+            head = _section_label(title)
+            head.setVisible(any(not w.isHidden() for w in members))
+            return head
+
+        build_btns = (self._settings, self._teach, self._teach_files,
+                      self._fonts, self._import, self._emulate)
+        system_btns = (self._comms, self._stations, self._admin)
+
+        buttons = QVBoxLayout()
+        buttons.setSpacing(6)
+        buttons.addWidget(_section_label("RUN"))
+        buttons.addLayout(_btn_row(self._start, self._stop))
+        buttons.addLayout(_btn_row(self._challenge, self._review, self._events_btn))
+        buttons.addWidget(_section("BUILD RECIPE", build_btns))
+        buttons.addLayout(_btn_row(self._settings, self._teach, self._teach_files))
+        buttons.addLayout(_btn_row(self._fonts, self._import, self._emulate))
+        buttons.addWidget(_section("SYSTEM", system_btns))
+        buttons.addLayout(_btn_row(self._comms, self._stations, self._admin))
+
         side = QVBoxLayout()
+        side.setSpacing(8)
+        cam_row = QHBoxLayout()
+        cam_row.addWidget(self._cam_status, 1)
+        cam_row.addWidget(self._cam_refresh)
+        side.addWidget(_section_label("CAMERA"))
+        side.addLayout(cam_row)
+        side.addWidget(_section_label("RECIPE"))
         side.addLayout(job_form)
         side.addWidget(self._state)
+        side.addWidget(_section_label("RESULTS"))
         side.addWidget(self._results_table, 1)  # the live results board
         side.addLayout(totals_row)
         side.addWidget(self._reasons)
@@ -277,6 +319,8 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
 
         self.statusBar().showMessage(f"Logged in as {username}")
+        self._status_task = None
+        self._refresh_camera_status()  # populate the camera status bar at startup
 
         self._timer = QTimer(self)
         self._timer.setInterval(100)
@@ -414,15 +458,38 @@ class MainWindow(QMainWindow):
         if self._signals is not None:
             bus.subscribe("inspection.result", self._signals.on_result)
         assignments = []
-        for cid in self._camera_ids:
-            if cid == self._camera_ids[0]:
-                cam_recipe = self._recipe  # already resolved above
-            else:
-                cam_recipe, _ = self._resolve_recipe_for(self._cam_recipe_combos[cid])
-                if variable_data:
-                    cam_recipe = resolve_batch_fields(cam_recipe, variable_data)
-            self._cam_recipes[cid] = cam_recipe
-            assignments.append((self._camera_factory(cid, None, cam_recipe), cam_recipe))
+        # Reflect the state change IMMEDIATELY — opening the camera can take ~1s,
+        # and the operator must see Start disable / Stop enable / "Starting…" at
+        # once, not after the device opens.
+        from PySide6.QtWidgets import QApplication
+
+        self._start.setEnabled(False)
+        self._stop.setEnabled(True)
+        self._set_state("Starting…", "#b8860b")
+        for label in self._cam_images.values():
+            label.setText("Starting camera…")
+        QApplication.processEvents()
+        try:
+            for cid in self._camera_ids:
+                if cid == self._camera_ids[0]:
+                    cam_recipe = self._recipe  # already resolved above
+                else:
+                    cam_recipe, _ = self._resolve_recipe_for(self._cam_recipe_combos[cid])
+                    if variable_data:
+                        cam_recipe = resolve_batch_fields(cam_recipe, variable_data)
+                self._cam_recipes[cid] = cam_recipe
+                assignments.append((self._camera_factory(cid, None, cam_recipe), cam_recipe))
+        except Exception as exc:
+            # camera busy / not found — revert cleanly instead of getting stuck
+            self._start.setEnabled(True)
+            self._stop.setEnabled(False)
+            self._set_state("Idle", "#888")
+            for label in self._cam_images.values():
+                label.setText("No camera running")
+            self.statusBar().showMessage(
+                f"Cannot start: {exc} — close Camera setup / Teach windows first."
+            )
+            return
         lanes = sorted(
             {r.reject_output for rec in self._cam_recipes.values() for r in rec.regions}
         )
@@ -457,6 +524,7 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(
                 "Running WITHOUT a batch — results are not being recorded (test mode)"
             )
+        self._refresh_camera_status()  # reflect "in use" without touching the device
 
     # ---- third-party integration (TCP + 24V) -----------------------------
     def open_challenge(self) -> None:
@@ -736,6 +804,7 @@ class MainWindow(QMainWindow):
             self._runner.join()
             self._runner = None
         self._timer.stop()
+        self._refresh_camera_status()  # camera free again — show full details
         self._refresh()  # final counter update
         self._start.setEnabled(True)
         self._stop.setEnabled(False)
@@ -843,11 +912,45 @@ class MainWindow(QMainWindow):
         (pick the reference from the filmstrip and mark ROIs on a real product)."""
 
         images = []
-        source = self._camera_factory(self._camera_id, None, self._recipe)
-        for frame in source.frames():
-            images.append(frame.image)
-            if len(images) >= 50:
-                break
+        try:
+            source = self._camera_factory(self._camera_id, None, self._recipe)
+        except Exception as exc:
+            self.statusBar().showMessage(
+                f"Cannot open camera for Teach: {exc} — stop inspection "
+                "and close other camera windows first."
+            )
+            return
+        # Teach must work regardless of trigger config: force free-run so the
+        # camera yields frames at the bench (a hardware trigger gives none).
+        self._force_free_run(source)
+        import time
+
+        from PySide6.QtWidgets import QApplication
+
+        self.statusBar().showMessage("Acquiring reference images for teaching…")
+        # Time-bounded: never wait forever (e.g. a hardware-trigger line sitting
+        # idle yields no frames). Grab up to 30 images or 8 seconds, whichever
+        # comes first, pumping the event loop so the UI stays responsive.
+        grab = getattr(source, "grab", None)
+        deadline = time.monotonic() + 8.0
+        if callable(grab):
+            while len(images) < 30 and time.monotonic() < deadline:
+                try:
+                    frame = grab(timeout=0.5)
+                except TypeError:
+                    frame = grab()
+                if frame is not None:
+                    images.append(frame.image)
+                self.statusBar().showMessage(f"Acquiring reference images… {len(images)}/30")
+                QApplication.processEvents()
+        else:  # cameras that only expose frames() (e.g. the simulator)
+            for frame in source.frames():
+                images.append(frame.image)
+                if len(images) % 5 == 0:
+                    self.statusBar().showMessage(f"Acquiring reference images… {len(images)}/30")
+                    QApplication.processEvents()
+                if len(images) >= 30:
+                    break
         close = getattr(source, "close", None)
         if callable(close):
             close()
@@ -897,15 +1000,24 @@ class MainWindow(QMainWindow):
             return
         recipe, _ = self._resolve_recipe()
         out = Path(folder) / "emulation_results"
+        # Emulating a whole folder runs the recipe (OCR/decode) over many images
+        # — far too slow to run on the GUI thread. Do it in the background.
+        from .background import run_in_background
+
         self.statusBar().showMessage("Emulating… (running the recipe over the folder)")
-        try:
-            summary = emulate_folder(recipe, folder, out)
-        except Exception as exc:
-            self.statusBar().showMessage(f"Emulation failed: {exc}")
-            return
-        self.statusBar().showMessage(
-            f"Emulated {summary.total} images: {summary.passed} pass, "
-            f"{summary.failed} fail — annotated images + results.csv in {out}"
+
+        def done(summary):
+            self.statusBar().showMessage(
+                f"Emulated {summary.total} images: {summary.passed} pass, "
+                f"{summary.failed} fail — annotated images + results.csv in {out}"
+            )
+
+        def failed(msg):
+            self.statusBar().showMessage(f"Emulation failed: {msg}")
+
+        run_in_background(
+            self, lambda: emulate_folder(recipe, folder, out), done, failed,
+            attr="_emulate_task",
         )
 
     def _open_teach_with_images(self, images) -> None:
@@ -922,26 +1034,133 @@ class MainWindow(QMainWindow):
         self._teach_window.resize(1040, 600)
         self._teach_window.show()
 
+    def _free_run_settings(self):
+        """The saved camera settings, but forced to free-run — for any preview /
+        teach acquisition that must show frames regardless of trigger config."""
+        import copy
+
+        from ..camera.settings import CameraSettings, TriggerMode
+        from ..camera.settings_store import load_settings
+
+        s = copy.deepcopy(load_settings(self._camera_id) or CameraSettings())
+        s.trigger.mode = TriggerMode.CONTINUOUS
+        return s
+
+    def _force_free_run(self, source) -> None:
+        live = getattr(source, "apply_settings", None)
+        if callable(live):
+            try:
+                live(self._free_run_settings())
+            except Exception:
+                pass
+
+    def _refresh_camera_status(self) -> None:
+        """Probe the camera (off the GUI thread) and update the status bar.
+        While inspection runs we don't open the device (it's in use)."""
+        import os
+
+        from ..camera.status import probe_camera_status
+        from .background import run_in_background
+
+        cti = os.environ.get("VIS_GENTL_CTI")
+        sim = self._simulation
+        running = self._runner is not None
+        self._cam_status.setText("Camera: checking…")
+        self._cam_status.setStyleSheet("color:#888; font-weight:bold")
+        run_in_background(
+            self,
+            lambda: probe_camera_status(sim, cti, read_live=not running),
+            self._show_camera_status,
+            lambda msg: self._show_camera_status(
+                {"mode": "gige", "connected": False, "summary": msg}
+            ),
+            attr="_status_task",
+        )
+
+    def _show_camera_status(self, st: dict) -> None:
+        mode = st.get("mode")
+        if mode == "simulator":
+            icon, color = "⚠", "#b8860b"
+            text = "SIMULATOR — no physical camera (run with VIS_CAMERA=gige)"
+        elif st.get("connected"):
+            icon, color = "●", "#2a8a2a"
+            text = st.get("summary", "connected")
+            if st.get("trigger") == "On":
+                text += "  ·  trigger: HARDWARE (frames on sensor pulse)"
+            elif st.get("trigger") == "Off":
+                text += "  ·  trigger: free-run"
+            elif st.get("busy"):
+                text += "  ·  (running)"
+        else:
+            icon, color = "✗", "#b33"
+            text = st.get("summary", "not connected")
+        self._cam_status.setText(f"{icon}  {text}")
+        self._cam_status.setStyleSheet(f"color:{color}; font-weight:bold")
+
     def open_settings(self) -> None:
         """Open the camera-settings screen with a live preview from the source."""
         from .settings_window import CameraSettingsWindow
 
-        source = self._camera_factory(self._camera_id, None, self._recipe)
-        state = {"gen": source.frames()}
+        try:
+            source = self._camera_factory(self._camera_id, None, self._recipe)
+        except Exception as exc:
+            self.statusBar().showMessage(
+                f"Cannot open camera for Settings: {exc} — stop inspection "
+                "and close other camera windows first."
+            )
+            return
+        state = {"gen": None}
 
         def provider():
+            # Prefer a single bounded grab (never blocks the GUI longer than the
+            # grab timeout); fall back to frames() for cameras without grab().
             try:
-                frame = next(state["gen"], None)
-                if frame is None:
-                    state["gen"] = self._camera_factory(self._camera_id, None, self._recipe).frames()
+                grab = getattr(source, "grab", None)
+                if callable(grab):
+                    try:
+                        frame = grab(timeout=0.2)  # short: keep the preview snappy
+                    except TypeError:
+                        frame = grab()  # camera grab() without a timeout arg
+                else:
+                    if state["gen"] is None:
+                        state["gen"] = source.frames()
                     frame = next(state["gen"], None)
+                    if frame is None:
+                        state["gen"] = source.frames()
                 return frame.image if frame is not None else None
             except Exception:
                 return None  # a bad preview must never block the settings screen
 
+        def cleanup():
+            close = getattr(source, "close", None)
+            if callable(close):
+                close()
+
+        import copy as _copy
+
+        from ..camera.settings import TriggerMode
+        from ..camera.settings_store import load_settings, save_settings
+
+        self._force_free_run(source)  # preview always shows frames (even in trigger mode)
+
+        def apply_and_persist(settings):
+            # Save the FULL settings (incl. the trigger choice) for Teach/Run,
+            # but keep the preview free-running so it's never blank here.
+            save_settings(self._camera_id, settings)
+            live = getattr(source, "apply_settings", None)
+            if callable(live):
+                preview = _copy.deepcopy(settings)
+                preview.trigger.mode = TriggerMode.CONTINUOUS
+                try:
+                    live(preview)
+                except Exception:
+                    pass
+
         self._settings_window = CameraSettingsWindow(
             image_provider=provider,
-            apply_callback=getattr(source, "apply_settings", None),
+            settings=load_settings(self._camera_id),
+            apply_callback=apply_and_persist,
+            cleanup_callback=cleanup,
         )
         self._settings_window.resize(900, 480)
         self._settings_window.show()

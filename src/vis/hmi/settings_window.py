@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMainWindow,
     QPushButton,
+    QScrollArea,
     QSlider,
     QSpinBox,
     QVBoxLayout,
@@ -41,6 +42,7 @@ class CameraSettingsWindow(QMainWindow):
         image_provider,
         settings: CameraSettings | None = None,
         apply_callback=None,
+        cleanup_callback=None,
         session_factory=None,
         camera_db_id: int | None = None,
         user_id=None,
@@ -50,6 +52,7 @@ class CameraSettingsWindow(QMainWindow):
         self.setWindowTitle("Vision Inspection — Camera Settings")
         self._image_provider = image_provider
         self._apply_callback = apply_callback
+        self._cleanup_callback = cleanup_callback
         self._sf = session_factory
         self._camera_db_id = camera_db_id
         self._user_id = user_id
@@ -188,13 +191,16 @@ class CameraSettingsWindow(QMainWindow):
         image_box = QGroupBox("Image / transport")
         image_box.setLayout(image_form)
 
-        apply_btn = QPushButton("Apply")
+        apply_btn = QPushButton("✓  Apply")
+        apply_btn.setProperty("variant", "primary")
+        apply_btn.setMinimumHeight(36)
         apply_btn.setToolTip("Send these settings to the camera now (the preview updates).")
         apply_btn.clicked.connect(self._apply)
         self._save_btn = QPushButton("Save to station")
         self._save_btn.setToolTip("Persist to the station camera configuration (audited).")
         self._save_btn.clicked.connect(self._save)
         self._save_btn.setEnabled(session_factory is not None and camera_db_id is not None)
+        self._save_btn.setMinimumHeight(36)
         buttons = QHBoxLayout()
         buttons.addWidget(apply_btn)
         buttons.addWidget(self._save_btn)
@@ -222,16 +228,30 @@ class CameraSettingsWindow(QMainWindow):
         self._status = QLabel("")
         self._status.setWordWrap(True)
 
+        # All controls live in a vertically scrollable area so they're reachable
+        # on any screen size; the Apply/Save buttons are pinned below it (a fixed
+        # footer) so the primary action is always visible without scrolling.
+        controls = QVBoxLayout()
+        controls.addWidget(exposure_box)
+        controls.addWidget(light_box)
+        controls.addWidget(trigger_box)
+        controls.addWidget(aoi_box)
+        controls.addWidget(image_box)
+        controls.addWidget(cal_box)
+        controls.addWidget(self._status)
+        controls.addStretch(1)
+        controls_widget = QWidget()
+        controls_widget.setLayout(controls)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(controls_widget)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+
         side = QVBoxLayout()
-        side.addWidget(exposure_box)
-        side.addWidget(light_box)
-        side.addWidget(trigger_box)
-        side.addWidget(aoi_box)
-        side.addWidget(image_box)
+        side.addWidget(scroll, 1)
         side.addLayout(buttons)
-        side.addWidget(cal_box)
-        side.addWidget(self._status)
-        side.addStretch(1)
         side_widget = QWidget()
         side_widget.setLayout(side)
 
@@ -305,7 +325,7 @@ class CameraSettingsWindow(QMainWindow):
         settings = self.settings_from_form()
         if self._apply_callback is not None:
             self._apply_callback(settings)
-        self._status.setText("Applied to camera")
+        self._status.setText("Applied & saved — Teach and Run will use these settings.")
 
     def _save(self) -> None:
         if self._sf is None or self._camera_db_id is None:
@@ -325,6 +345,21 @@ class CameraSettingsWindow(QMainWindow):
     def _calibrate(self) -> None:
         self.calibration = Calibration.from_known_length(self._cal_pixels.value(), self._cal_mm.value())
         self._cal_label.setText(f"{self.calibration.mm_per_pixel:.4f} mm/px")
+
+    def closeEvent(self, event) -> None:
+        # Stop polling and release the camera source so it can be reopened
+        # (a GigE camera is exclusively owned — a leaked handle blocks Teach
+        # and any later Settings open).
+        try:
+            self._timer.stop()
+        except Exception:
+            pass
+        if self._cleanup_callback is not None:
+            try:
+                self._cleanup_callback()
+            except Exception:
+                pass
+        super().closeEvent(event)
 
 
 def _link_int(spin, slider) -> None:

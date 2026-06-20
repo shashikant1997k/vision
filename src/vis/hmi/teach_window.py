@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
     QApplication,
@@ -43,6 +43,25 @@ from .teach_model import (
 )
 
 _FRIENDLY = {d["key"]: d["label"] for d in INSPECTION_TYPES}
+
+
+class _TestWorker(QThread):
+    """Run a blocking inspection callable off the GUI thread so Test / Test all
+    can't freeze the UI (OCR inference + first-run model load take seconds).
+    Results come back via a signal, which Qt delivers on the main thread."""
+
+    done = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, fn) -> None:
+        super().__init__()
+        self._fn = fn
+
+    def run(self) -> None:
+        try:
+            self.done.emit(self._fn())
+        except Exception as exc:  # never let a worker crash take down the window
+            self.failed.emit(str(exc))
 
 _PALETTE_ICONS = {
     "code_verify": "▦",
@@ -91,6 +110,8 @@ class TeachWindow(QMainWindow):
         self._pending = None  # None | ("region",) | ("tool", type_key)
         self._last_results = None
         self._loading = False
+        self._worker = None  # background Test/Test-all thread, when running
+        self._pending_done = None
 
         h, w = reference_image.shape[:2]
         # Start with one product covering the whole image (the common single-
@@ -129,7 +150,7 @@ class TeachWindow(QMainWindow):
         fit_btn.setToolTip("Reset zoom to fit")
         fit_btn.clicked.connect(self._image.reset_view)
         self._image.zoomChanged.connect(lambda z: self._zoom_label.setText(f"{int(z * 100)}%"))
-        test_all_btn = QPushButton("Test all")
+        self._test_all_btn = test_all_btn = QPushButton("Test all")
         test_all_btn.setToolTip("Run the recipe over all captured/loaded images.")
         test_all_btn.clicked.connect(self._test_all)
         film = QHBoxLayout()
@@ -227,7 +248,7 @@ class TeachWindow(QMainWindow):
         # --- actions ---
         self._status = QLabel("")
         self._status.setWordWrap(True)
-        test_btn = QPushButton("Test")
+        self._test_btn = test_btn = QPushButton("Test")
         test_btn.setProperty("variant", "primary")
         test_btn.clicked.connect(self._test)
         save_btn = QPushButton("Save draft")
@@ -339,15 +360,27 @@ class TeachWindow(QMainWindow):
 
     def _test_all(self) -> None:
         """Run the recipe over every captured image — a statistical check before
-        the recipe goes live."""
-        total = passed = 0
-        for image in self._bank:
-            for r in self._model.test(image):
-                total += 1
-                passed += int(r.passed)
-        self._status.setText(
-            f"Tested {len(self._bank)} captured image(s): {passed}/{total} products passed"
-        )
+        the recipe goes live. Runs off the GUI thread (OCR is slow)."""
+        if not any(region.tools for region in self._model.regions):
+            self._status.setText("Add at least one inspection (Read Code / Read Text) first.")
+            return
+        bank = list(self._bank)
+        model = self._model
+
+        def work():
+            total = passed = 0
+            for image in bank:
+                for r in model.test(image):
+                    total += 1
+                    passed += int(r.passed)
+            return (len(bank), passed, total)
+
+        self._run_async(work, self._test_all_done,
+                        "Testing all captured images… (running the recipe over each)")
+
+    def _test_all_done(self, res) -> None:
+        n, passed, total = res
+        self._status.setText(f"Tested {n} captured image(s): {passed}/{total} products passed")
 
     # ---- property panels --------------------------------------------------
     def _build_product_props(self) -> QWidget:
@@ -1040,10 +1073,54 @@ class TeachWindow(QMainWindow):
         if not any(region.tools for region in self._model.regions):
             self._status.setText("Add at least one inspection (Read Code / Read Text) first.")
             return
-        self._last_results = self._model.test(self._reference)
+        ref = self._reference
+        model = self._model
+        self._run_async(lambda: model.test(ref), self._test_done,
+                        "Testing… (the first run also loads the OCR model — a few seconds)")
+
+    def _test_done(self, results) -> None:
+        self._last_results = results
         self._rebuild_tree()  # annotate the inspection plan with ✓/✗ + read values
         self._refresh_view()
         self._status.setText(self._results_summary())
+
+    # --- background test runner (keeps the GUI responsive) ---------------------
+    def _run_async(self, fn, on_done, busy_message: str) -> None:
+        if self._worker is not None and self._worker.isRunning():
+            return  # a test is already running; ignore repeat clicks
+        self._pending_done = on_done
+        self._status.setText(busy_message)
+        self._set_test_enabled(False)
+        worker = _TestWorker(fn)
+        worker.done.connect(self._on_async_done)      # queued onto the GUI thread
+        worker.failed.connect(self._on_async_failed)
+        self._worker = worker
+        worker.start()
+
+    def _on_async_done(self, result) -> None:
+        cb, self._pending_done = self._pending_done, None
+        self._worker = None
+        self._set_test_enabled(True)
+        if cb is not None:
+            cb(result)
+
+    def _on_async_failed(self, message: str) -> None:
+        self._pending_done = None
+        self._worker = None
+        self._set_test_enabled(True)
+        self._status.setText(f"Test failed: {message}")
+
+    def _set_test_enabled(self, on: bool) -> None:
+        self._test_btn.setEnabled(on)
+        self._test_all_btn.setEnabled(on)
+
+    def closeEvent(self, event) -> None:
+        # Don't let a running background test outlive the window (a QThread
+        # destroyed while running crashes). Wait briefly for it to finish.
+        worker = self._worker
+        if worker is not None and worker.isRunning():
+            worker.wait(5000)
+        super().closeEvent(event)
 
     def _results_summary(self) -> str:
         products = self._last_results or []

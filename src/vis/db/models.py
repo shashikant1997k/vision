@@ -441,7 +441,6 @@ class FrameCapture(Base):
     batch_id: Mapped[int | None] = mapped_column(ForeignKey("batches.id"))
     camera_id: Mapped[str] = mapped_column(String(64))  # camera_id string from the frame
     frame_id: Mapped[int] = mapped_column(Integer)
-    image_ref: Mapped[str | None] = mapped_column(String(256))  # full frame (audit record)
-    crop_ref: Mapped[str | None] = mapped_column(String(256))   # product-region crop (review)
+    image_ref: Mapped[str | None] = mapped_column(String(256))  # product-region crop on disk
     passed: Mapped[bool] = mapped_column(Boolean)
     created_at: Mapped[str] = mapped_column(String(40), default=_utcnow_iso)

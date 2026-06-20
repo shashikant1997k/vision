@@ -38,28 +38,25 @@ class FrameArchiver:
             save_image = any_fail
 
         image_ref = None
-        crop_ref = None
         if save_image:
             from PIL import Image
 
-            base = os.path.join(self.directory, f"{frame.camera_id}_f{frame.frame_id:05d}")
-            image_ref = base + ".png"
-            Image.fromarray(frame.image).save(image_ref)  # full frame = audit record
-            # product-region crop for fast, clean review (best-effort; never fatal)
+            # store only the product-region crop (the centred product), not the
+            # whole frame — the rest is just conveyor/background. Best-effort:
+            # falls back to the full frame if no content is detected.
             try:
                 from ..engine.content_crop import crop_to_content
 
-                crop = crop_to_content(frame.image)
-                if crop.shape[:2] != frame.image.shape[:2]:  # only if it actually cropped
-                    crop_ref = base + "_crop.png"
-                    Image.fromarray(crop).save(crop_ref)
+                out = crop_to_content(frame.image)
             except Exception:
-                crop_ref = None
+                out = frame.image
+            image_ref = os.path.join(
+                self.directory, f"{frame.camera_id}_f{frame.frame_id:05d}.png"
+            )
+            Image.fromarray(out).save(image_ref)
             if self.uploader is not None:  # push to FTP / network archive
                 try:
                     image_ref = self.uploader(image_ref) or image_ref
-                    if crop_ref:
-                        crop_ref = self.uploader(crop_ref) or crop_ref
                 except Exception:
                     pass  # never let archiving break the line
 
@@ -70,7 +67,6 @@ class FrameArchiver:
                     camera_id=frame.camera_id,
                     frame_id=frame.frame_id,
                     image_ref=image_ref,
-                    crop_ref=crop_ref,
                     passed=not any_fail,
                 )
             )

@@ -188,6 +188,7 @@ class MainWindow(QMainWindow):
         self._challenge = QPushButton("Challenge test…")
         self._events_btn = QPushButton("Events…")
         self._comms = QPushButton("Comms…")
+        self._plc_params = QPushButton("PLC parameters…")
         self._stations = QPushButton("Stations…")
         self._admin = QPushButton("Admin…")
         self._settings = QPushButton("Camera setup…")
@@ -205,6 +206,7 @@ class MainWindow(QMainWindow):
         self._challenge.clicked.connect(self.open_challenge)
         self._events_btn.clicked.connect(self.open_events)
         self._comms.clicked.connect(self.open_comms)
+        self._plc_params.clicked.connect(self.open_plc_params)
         self._stations.clicked.connect(self.open_stations)
         self._admin.clicked.connect(self.open_admin)
         self._settings.clicked.connect(self.open_settings)
@@ -225,6 +227,7 @@ class MainWindow(QMainWindow):
             (self._import, Perm.RECIPE_CREATE),
             (self._fonts, Perm.RECIPE_CREATE),
             (self._comms, Perm.STATION_MANAGE),
+            (self._plc_params, Perm.STATION_MANAGE),
             (self._stations, Perm.STATION_MANAGE),
             (self._settings, Perm.STATION_MANAGE),
         ):
@@ -293,7 +296,7 @@ class MainWindow(QMainWindow):
 
         build_btns = (self._products_btn, self._settings, self._teach, self._teach_files,
                       self._fonts, self._import, self._emulate)
-        system_btns = (self._comms, self._stations, self._admin)
+        system_btns = (self._comms, self._plc_params, self._stations, self._admin)
 
         # === modern shell: header · [sidebar | feed | info] · footer ===========
         # --- left sidebar: vertical nav, full-width buttons, grouped ---
@@ -864,6 +867,27 @@ class MainWindow(QMainWindow):
         self._show_panel(lambda: CommsWindow(
             self._sf, apply_callback=self._apply_comms,
             status_provider=self.comms_status, parent=self,
+        ))
+
+    def _plc_register_client(self):
+        """Build a register client for the PLC parameters screen from the saved
+        comms config — real Modbus if configured, else the in-memory simulator."""
+        from ..integrations.plc_params import ModbusRegisterClient, SimulatedRegisterClient
+        from .comms_window import load_comms_config
+
+        config = load_comms_config(self._sf)
+        if config.get("io_backend") == "modbus" and config.get("io_host"):
+            return ModbusRegisterClient(config["io_host"], int(config.get("io_port", 502)))
+        return SimulatedRegisterClient()
+
+    def open_plc_params(self) -> None:
+        if self._sf is None:
+            self.statusBar().showMessage("No database — PLC parameters unavailable.")
+            return
+        from .plc_params_window import PlcParametersWindow
+
+        self._show_panel(lambda: PlcParametersWindow(
+            self._sf, client_factory=self._plc_register_client, parent=self,
         ))
 
     def closeEvent(self, event) -> None:  # fail-safe: drop READY, stop server

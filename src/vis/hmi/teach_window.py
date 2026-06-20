@@ -29,6 +29,7 @@ from .approve_dialog import ApproveDialog
 from .roi_label import ImageRoiLabel
 from .teach_model import (
     BATCH_FIELDS,
+    DATE_PATTERN,
     FONT_KEYS,
     INSPECTION_TYPES,
     MATCH_TOOLS,
@@ -688,9 +689,16 @@ class TeachWindow(QMainWindow):
             region = self._model.regions[region_index]
             rel = ROI(max(0, x - region.roi.x), max(0, y - region.roi.y), w, h)
             count = sum(len(r.tools) for r in self._model.regions) + 1
+            # "Read Date" preset → an OCR text field pre-tuned for dates
+            date_preset = type_key == "date"
+            if date_preset:
+                type_key = "ocv_text"
             prefix = {"code_verify": "code", "ocv_text": "text", "ocv_font": "ocv"}.get(type_key, type_key)
-            tool_id = prefix + str(count)
-            if type_key in MATCH_TOOLS:
+            tool_id = ("date" if date_preset else prefix) + str(count)
+            if date_preset:
+                config = {"match": "regex", "pattern": DATE_PATTERN,
+                          "charset": "digits", "uppercase": True}
+            elif type_key in MATCH_TOOLS:
                 config = tool_config(type_key, "")
             else:
                 config = default_config(type_key)

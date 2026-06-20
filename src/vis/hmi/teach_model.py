@@ -26,6 +26,12 @@ INSPECTION_TYPES = [
         "category": "read",
     },
     {
+        "key": "date",
+        "label": "Read Date (MFG/EXP)",
+        "expected_label": "",
+        "category": "read",
+    },
+    {
         "key": "ocv_font",
         "label": "Verify Text (OCV — trained font)",
         "expected_label": "Expected text, e.g. LOT42",
@@ -68,6 +74,10 @@ CODE_MODES = [FIXED, ANY_CODE, PATTERN]
 TEXT_MODES = [FIXED, CONTAINS, PATTERN]
 
 ROTATIONS = [0, 90, 180, 270]
+
+# Flexible pharma date pattern: MM/YYYY, DD/MM/YY, DD-MM-YYYY, etc. (separators
+# /, ., -). Used by the one-click "Read Date" preset together with digits-charset.
+DATE_PATTERN = r"\d{1,2}[/.\-]\d{2,4}(?:[/.\-]\d{2,4})?"
 
 # Batch fields entered before each batch (the "fed before every batch" values).
 BATCH_FIELDS = [

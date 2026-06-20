@@ -205,22 +205,69 @@ def _metric(text: str, score: float) -> float:
     return len(text.replace(" ", "")) * max(score, 0.01)
 
 
+def _prepare_variants(image) -> list:
+    """Several preprocessed RGB variants of an ROI — OCR reads each and keeps the
+    best. Pharma cartons vary wildly (foil, security guilloche/mesh, faint TIJ
+    dates on a busy background); no single filter wins, so we try a contrast-
+    normalised, a denoised, and a background-flattened version."""
+    arr = _pad(image, 6)
+    try:
+        import cv2
+    except Exception:
+        return [arr]
+    gray = cv2.cvtColor(arr, cv2.COLOR_RGB2GRAY)
+    h = gray.shape[0]
+    target = 140  # PP-OCR reads small text far better enlarged to ~this height
+    if 0 < h < target:
+        factor = min(4.0, target / h)
+        gray = cv2.resize(gray, None, fx=factor, fy=factor, interpolation=cv2.INTER_CUBIC)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    variants = []
+    # 1. contrast-normalised — the proven default that reads clean print
+    variants.append(clahe.apply(gray) if gray.std() < 55 else gray)
+    # 2. edge-preserving denoise + normalise — suppresses security-mesh speckle
+    variants.append(clahe.apply(cv2.bilateralFilter(gray, 7, 60, 60)))
+    # 3. background-flattened — lifts dark print off a busy/textured background
+    ksize = max(9, (gray.shape[0] // 3) | 1)
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ksize, ksize))
+    blackhat = cv2.morphologyEx(gray, cv2.MORPH_BLACKHAT, kernel)
+    flat = cv2.subtract(255, cv2.normalize(blackhat, None, 0, 255, cv2.NORM_MINMAX))
+    variants.append(flat)
+    return [cv2.cvtColor(v, cv2.COLOR_GRAY2RGB) for v in variants]
+
+
 def recognize(roi_image) -> tuple[str, float]:
     """Return (text, mean_confidence) for a cropped ROI.
 
-    Strategy: recognition-only on the whole crop FIRST (fixed single-line ROIs
-    are the industrial norm); a confident read short-circuits — faster than
-    det+rec. Otherwise also run detect+recognise and keep the better read
-    (handles multi-line or loose boxes)."""
+    Tries several preprocessing variants (contrast / denoise / background-flatten)
+    and keeps the best read — robust across foil, security-mesh and faint dates.
+    Recognition-only on the whole crop first (fixed single-line ROIs are the
+    norm); a confident read short-circuits; otherwise a detector pass is added."""
     engine = _engine()
-    image = _prepare(roi_image)
-    text1, score1 = _run_rec_only(engine, image)
-    if score1 >= 0.85 and len(text1.replace(" ", "")) >= 2:
-        return text1, score1
-    text2, score2 = _run_det_rec(engine, image)
-    if _metric(text2, score2) > _metric(text1, score1):
-        return text2, score2
-    return text1, score1
+    variants = _prepare_variants(roi_image)
+    primary = variants[0] if variants else _pad(roi_image, 6)
+    # primary path (contrast-normalised) — proven for clean print; short-circuit
+    text, score = _run_rec_only(engine, primary)
+    if score >= 0.85 and len(text.replace(" ", "")) >= 2:
+        return text, score
+    best = (text, score)
+    try:  # a detector pass on the primary (multi-line / loose boxes)
+        t2, s2 = _run_det_rec(engine, primary)
+        if _metric(t2, s2) > _metric(*best):
+            best = (t2, s2)
+    except Exception:
+        pass
+    # If the primary path read anything usable, keep it — never let a noisy
+    # cleanup variant override a real read (length-weighted metric is unsafe here).
+    if len(best[0].replace(" ", "")) >= 2:
+        return best
+    # primary read nothing — the print is hard (mesh/foil/faint). Last resort:
+    # the denoise / background-flatten variants, accepting only a real read.
+    for image in variants[1:]:
+        t, s = _run_rec_only(engine, image)
+        if len(t.replace(" ", "")) >= 2 and _metric(t, s) > _metric(*best):
+            best = (t, s)
+    return best
 
 
 def _normalize(text: str, config: dict) -> str:

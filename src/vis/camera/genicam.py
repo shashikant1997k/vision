@@ -124,6 +124,12 @@ class HarvesterCamera(CameraDevice):
         _try_set(node_map, "GevSCPSPacketSize", 1500)
         _try_set(node_map, "ExposureTime", float(s.exposure_us))
         _try_set(node_map, "Gain", float(s.gain_db))
+        if getattr(s, "black_level", 0):
+            _try_set(node_map, "BlackLevel", float(s.black_level))
+        if getattr(s, "sharpness", 0):
+            # node name differs by vendor; try the common ones (best-effort)
+            for nm in ("Sharpness", "SharpnessEnhancement", "SharpnessAmount"):
+                _try_set(node_map, nm, float(s.sharpness))
         if s.frame_rate:
             _try_set(node_map, "AcquisitionFrameRate", float(s.frame_rate))
         if s.sensor_roi.w and s.sensor_roi.h:
@@ -146,6 +152,11 @@ class HarvesterCamera(CameraDevice):
                 _try_set(node_map, "TriggerSource", s.trigger.source)
             if s.trigger.delay_us:
                 _try_set(node_map, "TriggerDelay", float(s.trigger.delay_us))
+            if getattr(s.trigger, "debounce_us", 0):
+                # anti-bounce on the trigger line; node name varies by vendor
+                for nm in ("LineDebouncerHighTimeAbs", "TriggerDebouncerHighTimeAbs",
+                           "LineDebouncerTime"):
+                    _try_set(node_map, nm, float(s.trigger.debounce_us))
         # (re)start streaming once configured
         try:
             self._acquirer.start()

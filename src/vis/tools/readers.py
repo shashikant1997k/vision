@@ -51,8 +51,9 @@ def get_code_reader(name: str | None = None):
 
 
 def _builtin_text(image, config):
-    from .ocr import _match_key, _normalize, recognize
+    from .ocr import _apply_ops, _match_key, _normalize, recognize
 
+    image = _apply_ops(image, config)  # operator overrides (invert / erode / dilate)
     # For verification (we know the expected value/pattern), let the reader try
     # all image transforms until the text resolves through glare/reflection.
     mode = (config or {}).get("match", "exact")

@@ -122,10 +122,16 @@ class CameraSettingsWindow(QMainWindow):
         self._trig_divider.setRange(1, 100_000)
         self._trig_divider.setValue(settings.trigger.divider)
         self._trig_divider.setToolTip("Encoder pulses per trigger (line-speed-independent capture).")
+        self._trig_debounce = QSpinBox()
+        self._trig_debounce.setRange(0, 1_000_000)
+        self._trig_debounce.setSuffix(" µs")
+        self._trig_debounce.setValue(getattr(settings.trigger, "debounce_us", 0))
+        self._trig_debounce.setToolTip("Ignore trigger edges within this window — stops one product double-triggering (sensor bounce).")
         trigger_form = QFormLayout()
         trigger_form.addRow("Mode", self._trigger_mode)
         trigger_form.addRow("Source", self._trigger_source)
         trigger_form.addRow("Trigger delay", self._trig_delay)
+        trigger_form.addRow("Debounce", self._trig_debounce)
         trigger_form.addRow("Encoder divider", self._trig_divider)
         trigger_box = QGroupBox("Trigger")
         trigger_box.setLayout(trigger_form)
@@ -194,10 +200,20 @@ class CameraSettingsWindow(QMainWindow):
         self._gamma.setRange(0.1, 4.0)
         self._gamma.setSingleStep(0.1)
         self._gamma.setValue(settings.gamma)
+        self._black_level = QSpinBox()
+        self._black_level.setRange(0, 255)
+        self._black_level.setValue(getattr(settings, "black_level", 0))
+        self._black_level.setToolTip("Sensor black-level offset — lifts dark detail off the floor (0 = camera default).")
+        self._sharpness = QSpinBox()
+        self._sharpness.setRange(0, 100)
+        self._sharpness.setValue(getattr(settings, "sharpness", 0))
+        self._sharpness.setToolTip("In-camera edge sharpening for crisper print edges (0 = off).")
         image_form = QFormLayout()
         image_form.addRow("Frame rate", self._fps)
         image_form.addRow("White balance", self._wb)
         image_form.addRow("Gamma", self._gamma)
+        image_form.addRow("Black level", self._black_level)
+        image_form.addRow("Sharpness", self._sharpness)
         image_form.addRow("Packet size", self._packet)
         image_box = QGroupBox("Image / transport")
         image_box.setLayout(image_form)
@@ -297,6 +313,8 @@ class CameraSettingsWindow(QMainWindow):
             white_balance=self._wb.currentText(),
             packet_size=self._packet.value(),
             gamma=self._gamma.value(),
+            black_level=self._black_level.value(),
+            sharpness=self._sharpness.value(),
             sensor_roi=SensorROI(
                 x=self._aoi_x.value(),
                 y=self._aoi_y.value(),
@@ -308,6 +326,7 @@ class CameraSettingsWindow(QMainWindow):
                 source=self._trigger_source.text(),
                 delay_us=self._trig_delay.value(),
                 divider=self._trig_divider.value(),
+                debounce_us=self._trig_debounce.value(),
             ),
             lighting=LightingConfig(
                 brightness=self._light_bright.value(),

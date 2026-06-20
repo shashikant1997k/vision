@@ -17,6 +17,7 @@ class TriggerConfig:
     source: str = ""  # e.g. "Line1", "EncoderA/B"
     delay_us: int = 0
     divider: int = 1  # encoder pulses per trigger
+    debounce_us: int = 0  # ignore trigger edges within this window (anti-bounce)
 
     def to_dict(self) -> dict:
         return {
@@ -24,6 +25,7 @@ class TriggerConfig:
             "source": self.source,
             "delay_us": self.delay_us,
             "divider": self.divider,
+            "debounce_us": self.debounce_us,
         }
 
     @classmethod
@@ -34,6 +36,7 @@ class TriggerConfig:
             source=d.get("source", ""),
             delay_us=int(d.get("delay_us", 0)),
             divider=int(d.get("divider", 1)),
+            debounce_us=int(d.get("debounce_us", 0)),
         )
 
 
@@ -88,6 +91,8 @@ class CameraSettings:
     white_balance: str = "auto"
     packet_size: int = 9000  # jumbo frames for GigE (D-011)
     gamma: float = 1.0
+    black_level: int = 0  # sensor black-level offset (0 = leave default)
+    sharpness: int = 0    # sharpening strength (0 = off)
     sensor_roi: SensorROI = field(default_factory=SensorROI)
     trigger: TriggerConfig = field(default_factory=TriggerConfig)
     lighting: LightingConfig = field(default_factory=LightingConfig)
@@ -100,6 +105,8 @@ class CameraSettings:
             "white_balance": self.white_balance,
             "packet_size": self.packet_size,
             "gamma": self.gamma,
+            "black_level": self.black_level,
+            "sharpness": self.sharpness,
             "sensor_roi": asdict(self.sensor_roi),
             "trigger": self.trigger.to_dict(),
             "lighting": self.lighting.to_dict(),
@@ -116,6 +123,8 @@ class CameraSettings:
             white_balance=d.get("white_balance", "auto"),
             packet_size=int(d.get("packet_size", 9000)),
             gamma=float(d.get("gamma", 1.0)),
+            black_level=int(d.get("black_level", 0)),
+            sharpness=int(d.get("sharpness", 0)),
             sensor_roi=SensorROI(
                 x=int(roi.get("x", 0)),
                 y=int(roi.get("y", 0)),

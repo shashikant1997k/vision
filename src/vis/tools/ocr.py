@@ -312,6 +312,35 @@ _DIGIT_FOLD = str.maketrans({
 })
 
 
+def _apply_ops(image, config):
+    """Operator image-processing overrides applied before OCR (CodeScan-style):
+    polarity invert (white-on-black print) and morphological erode/dilate to tune
+    stroke thickness on faint or heavy print. No-op unless one is set."""
+    cfg = config or {}
+    invert = bool(cfg.get("invert"))
+    erode = int(cfg.get("erode", 0) or 0)
+    dilate = int(cfg.get("dilate", 0) or 0)
+    if not (invert or erode or dilate):
+        return image
+    import numpy as np
+
+    try:
+        import cv2
+    except Exception:
+        return image
+    arr = np.asarray(image)
+    gray = cv2.cvtColor(arr[..., :3], cv2.COLOR_RGB2GRAY) if arr.ndim == 3 else arr
+    if invert:
+        gray = cv2.bitwise_not(gray)
+    if erode:  # shrink bright areas → thickens dark print
+        k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * erode + 1, 2 * erode + 1))
+        gray = cv2.erode(gray, k)
+    if dilate:  # grow bright areas → thins dark print
+        k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * dilate + 1, 2 * dilate + 1))
+        gray = cv2.dilate(gray, k)
+    return cv2.cvtColor(gray, cv2.COLOR_GRAY2RGB)
+
+
 def _apply_charset(text: str, charset: str) -> str:
     """Constrain a read to an allowed character subset (the OCV 'character
     subset'/whitelist). For digit fields, fold lookalike letters to digits and

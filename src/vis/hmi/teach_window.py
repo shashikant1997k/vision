@@ -502,6 +502,18 @@ class TeachWindow(QMainWindow):
             "kill 0/O, 5/S confusion) — documented vendor practice."
         )
         self._t_charset.currentIndexChanged.connect(self._tool_edited)
+        # image-processing overrides (CodeScan-style) — help hard/glary/faint print
+        self._t_invert = QCheckBox("White-on-black (invert)")
+        self._t_invert.setToolTip("Tick if the print is light text on a dark background.")
+        self._t_invert.toggled.connect(self._tool_edited)
+        self._t_erode = QSpinBox()
+        self._t_erode.setRange(0, 8)
+        self._t_erode.setToolTip("Erode: thicken dark print (joins broken/faint strokes).")
+        self._t_erode.valueChanged.connect(self._tool_edited)
+        self._t_dilate = QSpinBox()
+        self._t_dilate.setRange(0, 8)
+        self._t_dilate.setToolTip("Dilate: thin dark print (separates merged/heavy strokes).")
+        self._t_dilate.valueChanged.connect(self._tool_edited)
         self._t_font = QComboBox()
         self._t_font.setToolTip(
             "Trained OCV font (print technology + size). Train more in Fonts…"
@@ -525,6 +537,17 @@ class TeachWindow(QMainWindow):
         form.addRow("Min confidence", self._t_minconf)
         form.addRow("Font", self._t_font)
         form.addRow("Charset", self._t_charset)
+        ops_row = QHBoxLayout()
+        ops_row.setContentsMargins(0, 0, 0, 0)
+        ops_row.addWidget(QLabel("Erode"))
+        ops_row.addWidget(self._t_erode)
+        ops_row.addWidget(QLabel("Dilate"))
+        ops_row.addWidget(self._t_dilate)
+        ops_row.addStretch(1)
+        self._ops_widget = QWidget()
+        self._ops_widget.setLayout(ops_row)
+        form.addRow("", self._t_invert)
+        form.addRow("Stroke", self._ops_widget)
         form.addRow("", self._t_required)
         form.addRow("Last read", self._t_lastread)
         self._tool_form = form
@@ -917,6 +940,13 @@ class TeachWindow(QMainWindow):
             self._tool_form.setRowVisible(self._t_charset, tool.tool_type in ("ocv_font", "ocv_text"))
             idx = self._t_charset.findData((tool.config or {}).get("charset", "") or "")
             self._t_charset.setCurrentIndex(idx if idx >= 0 else 0)
+            # image-processing overrides (invert / erode / dilate) for read tools
+            show_ops = tool.tool_type in ("ocv_font", "ocv_text")
+            self._tool_form.setRowVisible(self._t_invert, show_ops)
+            self._tool_form.setRowVisible(self._ops_widget, show_ops)
+            self._t_invert.setChecked(bool((tool.config or {}).get("invert")))
+            self._t_erode.setValue(int((tool.config or {}).get("erode", 0) or 0))
+            self._t_dilate.setValue(int((tool.config or {}).get("dilate", 0) or 0))
             if is_font_tool:
                 self._load_fonts(tool)
             self._t_lastread.setText(self._last_read_for(region.region_id, tool.tool_id))
@@ -1040,8 +1070,15 @@ class TeachWindow(QMainWindow):
             for key in FONT_KEYS:  # the trained font must survive match edits
                 if key in (tool.config or {}):
                     cfg[key] = tool.config[key]
-        if tool.tool_type in ("ocv_font", "ocv_text") and self._t_charset.currentData():
-            cfg["charset"] = self._t_charset.currentData()  # digits-only dates etc.
+        if tool.tool_type in ("ocv_font", "ocv_text"):
+            if self._t_charset.currentData():
+                cfg["charset"] = self._t_charset.currentData()  # digits-only dates etc.
+            if self._t_invert.isChecked():
+                cfg["invert"] = True
+            if self._t_erode.value():
+                cfg["erode"] = self._t_erode.value()
+            if self._t_dilate.value():
+                cfg["dilate"] = self._t_dilate.value()
         tool.config = cfg
         self._t_value.setPlaceholderText(value_hint(tool.tool_type, mode))
         self._sync_tool_inputs(mode)

@@ -140,7 +140,8 @@ class MainWindow(QMainWindow):
         self._pass = QLabel("0")
         self._fail = QLabel("0")
         self._yield = QLabel("—")
-        for label in (self._total, self._pass, self._fail, self._yield):
+        self._cycle = QLabel("—")
+        for label in (self._total, self._pass, self._fail, self._yield, self._cycle):
             label.setStyleSheet("font-size: 15px; font-weight: bold")
         self._state = QLabel("● Idle")
         self._state.setStyleSheet("color:#888; font-weight:bold")
@@ -179,6 +180,13 @@ class MainWindow(QMainWindow):
         self._start.setProperty("variant", "primary")
         self._stop = QPushButton("■  Stop")
         self._stop.setProperty("variant", "danger")
+        self._conveyor_btn = QPushButton("Conveyor ON")
+        self._conveyor_btn.setCheckable(True)
+        self._conveyor_btn.setToolTip("Run/stop the conveyor output (needs a CONVEYOR channel wired in Comms).")
+        self._conveyor_btn.toggled.connect(self._toggle_conveyor)
+        self._ack_btn = QPushButton("Error Ack")
+        self._ack_btn.setToolTip("Acknowledge a line-stop alarm: clear the ALARM output and reject streak.")
+        self._ack_btn.clicked.connect(self._error_ack)
         self._teach = QPushButton("Teach…")
         self._teach_files = QPushButton("Teach on images…")
         self._emulate = QPushButton("Emulate folder…")
@@ -239,6 +247,7 @@ class MainWindow(QMainWindow):
         for caption, label in (
             ("Total", self._total), ("Pass", self._pass),
             ("Reject", self._fail), ("Yield", self._yield),
+            ("Cycle", self._cycle),
         ):
             cap = QLabel(caption)
             cap.setStyleSheet("color:#667")
@@ -312,6 +321,8 @@ class MainWindow(QMainWindow):
         sidebar.addWidget(_section_label("RUN"))
         sidebar.addWidget(self._start)
         sidebar.addWidget(self._stop)
+        sidebar.addWidget(self._conveyor_btn)
+        sidebar.addWidget(self._ack_btn)
         for w in (self._batches_btn, self._challenge, self._review, self._events_btn):
             sidebar.addWidget(w)
         sidebar.addWidget(_section("BUILD RECIPE", build_btns))
@@ -908,6 +919,28 @@ class MainWindow(QMainWindow):
     def _set_state(self, text: str, color: str) -> None:
         self._state.setText(f"● {text}")
         self._state.setStyleSheet(f"color:{color}; font-weight:bold")
+
+    def _toggle_conveyor(self, on: bool) -> None:
+        self._conveyor_btn.setText("Conveyor OFF" if on else "Conveyor ON")
+        if self._signals is not None:
+            self._signals.set_conveyor(on)
+            self._log_event("info", "line", f"Conveyor {'ON' if on else 'OFF'} by operator")
+        else:
+            self.statusBar().showMessage(
+                "No CONVEYOR output wired — set its channel in Comms to drive the conveyor."
+            )
+
+    def _error_ack(self) -> None:
+        """Acknowledge a line-stop alarm: clear the ALARM output, reset the
+        consecutive-reject streak and return the state to Idle so the line can
+        be restarted after the operator has fixed the cause."""
+        if self._signals is not None:
+            self._signals.reset_alarm()
+        self._stats.reset_consecutive()
+        if "ALARM" in self._state.text():
+            self._set_state("Idle", "#888")
+        self.statusBar().showMessage("Alarm acknowledged.")
+        self._log_event("info", "line", "Alarm acknowledged by operator")
 
     def close_batch(self) -> None:
         if self._batch_id is None or self._sf is None:
@@ -1521,6 +1554,9 @@ class MainWindow(QMainWindow):
         self._pass.setText(str(totals["passed"]))
         self._fail.setText(str(totals["failed"]))
         self._yield.setText(f"{totals.get('yield', 0.0):.1f} %" if totals["total"] else "—")
+        cyc = self._stats.cycle_ms()
+        self._cycle.setText(f"{cyc['last']:.0f} ms" if cyc["last"] else "—")
+        self._cycle.setToolTip(f"Inspection cycle time — last {cyc['last']:.0f} ms, avg {cyc['avg']:.0f} ms")
         reasons = self._stats.reject_reasons()
         if reasons:
             top = ", ".join(f"{name}×{n}" for name, n in list(reasons.items())[:4])

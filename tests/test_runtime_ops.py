@@ -23,6 +23,17 @@ def test_stats_yield_and_reject_reasons():
     assert "code1" not in reasons  # code1 passed -> not a reject reason
 
 
+def test_cycle_time_tracks_last_and_smoothed_average():
+    stats = LiveStats()
+    assert stats.cycle_ms() == {"last": 0.0, "avg": 0.0}  # nothing yet
+    stats.record_cycle(100.0)
+    assert stats.cycle_ms() == {"last": 100.0, "avg": 100.0}  # first sample seeds avg
+    stats.record_cycle(200.0)
+    c = stats.cycle_ms()
+    assert c["last"] == 200.0
+    assert 100.0 < c["avg"] < 200.0  # EWMA moves toward the new value, not all the way
+
+
 def test_failed_image_log_ring_buffer():
     import numpy as np
 

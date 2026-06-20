@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from threading import Event, Thread
+from time import perf_counter
 
 from ..common.events import EventBus
 from ..engine.pipeline import InspectionPipeline
@@ -55,7 +56,9 @@ class InspectionRunner:
                     break
                 self.live_view.update(frame, [])  # show the fresh frame at once
                 try:
+                    t0 = perf_counter()
                     results = pipeline.process_frame(frame)
+                    self.stats.record_cycle((perf_counter() - t0) * 1000.0)
                 except Exception:
                     continue  # a bad frame / read error must never stop the line
                 self.live_view.update(frame, results)

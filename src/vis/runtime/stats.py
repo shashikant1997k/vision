@@ -11,6 +11,19 @@ class LiveStats:
     def __init__(self) -> None:
         self._lock = Lock()
         self._per_camera: dict[str, dict] = {}
+        self._cycle_last = 0.0
+        self._cycle_avg = 0.0  # exponential moving average (ms)
+
+    def record_cycle(self, ms: float) -> None:
+        """Record one inspection cycle time (ms) — drives the live readout that
+        tells the operator the line is keeping up with the trigger rate."""
+        with self._lock:
+            self._cycle_last = float(ms)
+            self._cycle_avg = ms if self._cycle_avg == 0.0 else 0.8 * self._cycle_avg + 0.2 * ms
+
+    def cycle_ms(self) -> dict[str, float]:
+        with self._lock:
+            return {"last": round(self._cycle_last, 1), "avg": round(self._cycle_avg, 1)}
 
     def record(self, region_result) -> None:
         with self._lock:
@@ -54,6 +67,13 @@ class LiveStats:
                 out["failed"] += cam["failed"]
             out["yield"] = (100.0 * out["passed"] / out["total"]) if out["total"] else 0.0
             return out
+
+    def reset_consecutive(self) -> None:
+        """Clear the consecutive-reject streak on all cameras — used when the
+        operator acknowledges a line-stop alarm so a restart doesn't re-trip it."""
+        with self._lock:
+            for cam in self._per_camera.values():
+                cam["consecutive_failed"] = 0
 
     def consecutive_failures(self) -> int:
         """The worst current run of consecutive rejects across cameras — drives

@@ -29,6 +29,7 @@ class SignalMap:
     reject_pulse: int = 0
     alarm: int = 0
     heartbeat: int = 0
+    conveyor: int = 0  # conveyor run output (operator CONVEYOR ON/OFF)
     pass_pulse_ms: int = 50
     reject_pulse_ms: int = 100
     heartbeat_ms: int = 500
@@ -36,7 +37,7 @@ class SignalMap:
     def to_dict(self) -> dict:
         return {k: getattr(self, k) for k in (
             "ready", "running", "pass_pulse", "reject_pulse", "alarm",
-            "heartbeat", "pass_pulse_ms", "reject_pulse_ms", "heartbeat_ms",
+            "heartbeat", "conveyor", "pass_pulse_ms", "reject_pulse_ms", "heartbeat_ms",
         )}
 
     @classmethod
@@ -69,6 +70,9 @@ class LineSignals:
 
     def set_running(self, running: bool) -> None:
         self._write(self.map.running, running)
+
+    def set_conveyor(self, on: bool) -> None:
+        self._write(self.map.conveyor, on)
 
     def set_alarm(self, alarm: bool) -> None:
         with self._lock:

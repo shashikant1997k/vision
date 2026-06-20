@@ -75,7 +75,9 @@ def _make_camera_factory():
     if choice == "hikrobot" or (choice == "auto" and hik_available()):
         def hik_factory(camera_id, settings, recipe):
             from ..camera.hikrobot import HikrobotCamera
+            from ..camera.settings_store import load_settings
 
+            settings = settings or load_settings(camera_id)
             camera = HikrobotCamera(camera_id, settings=settings, **_hik_device_for(camera_id))
             camera.open()
             return camera
@@ -87,7 +89,9 @@ def _make_camera_factory():
             # out-of-process worker (reliable on macOS); the in-venv binding
             # segfaults, so we read frames from a brew-python worker subprocess.
             from ..camera.aravis_proc import AravisProcessCamera
+            from ..camera.settings_store import load_settings
 
+            settings = settings or load_settings(camera_id)
             dev = _hik_device_for(camera_id)  # same id->index/serial mapping
             kwargs = {"device_id": dev["serial"]} if "serial" in dev else {
                 "device_index": dev.get("device_index", 0)
@@ -102,8 +106,10 @@ def _make_camera_factory():
     if choice == "gige" or (choice == "auto" and cti):
         def gige_factory(camera_id, settings, recipe):
             from ..camera.genicam import HarvesterCamera
+            from ..camera.settings_store import load_settings
 
             index = int(os.environ.get("VIS_CAMERA_INDEX", "0"))
+            settings = settings or load_settings(camera_id)
             camera = HarvesterCamera(camera_id, cti_path=cti, device_index=index, settings=settings)
             camera.open()
             return camera
@@ -192,11 +198,14 @@ def _select_station(session_factory):
     stations = repo.list_stations()
     if not stations:
         return None, None
-    labels = [f"{name}{(' / ' + line) if line else ''}" for _sid, name, line in stations]
-    choice, ok = QInputDialog.getItem(None, "Select station", "Station:", labels, 0, False)
-    if not ok:
-        return None, None
-    sid = stations[labels.index(choice)][0]
+    if len(stations) == 1:
+        sid = stations[0][0]  # one station → just use it, no prompt
+    else:
+        labels = [f"{name}{(' / ' + line) if line else ''}" for _sid, name, line in stations]
+        choice, ok = QInputDialog.getItem(None, "Select station", "Station:", labels, 0, False)
+        if not ok:
+            return None, None
+        sid = stations[labels.index(choice)][0]
     cams = repo.camera_recipes(sid)
     if not cams:
         return None, None

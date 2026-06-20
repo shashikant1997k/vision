@@ -19,7 +19,9 @@ class StubOCVTool(InspectionTool):
 
     def inspect(self, roi_image) -> ToolResult:
         expected = str(self.config.get("expected", ""))
-        measured = str(int(roi_image[0, 0, 0])) if roi_image.size else ""
+        # First pixel, whether the frame is colour (H,W,3) or mono (H,W): a real
+        # Mono8 GigE camera delivers 2-D arrays, the sim delivers 3-D.
+        measured = str(int(roi_image.reshape(-1)[0])) if roi_image.size else ""
         passed = measured == expected
         return ToolResult(
             tool_id=self.tool_id,

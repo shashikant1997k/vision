@@ -182,8 +182,11 @@ def _run_rec_only(engine, image) -> tuple[str, float]:
         return "", 0.0
     if not result:
         return "", 0.0
-    texts = [item[1] for item in result]
-    scores = [float(item[2]) for item in result]
+    # rapidocr's rec-only items are [text, score] (2-tuple); some versions
+    # carry a leading box as [box, text, score]. The score is always last and
+    # the text immediately precedes it — index from the end to support both.
+    texts = [str(item[-2]) for item in result]
+    scores = [float(item[-1]) for item in result]
     return " ".join(texts).strip(), (sum(scores) / len(scores))
 
 

@@ -29,6 +29,12 @@ class CameraDevice(ABC):
         self.info = info
         self.settings = settings or CameraSettings()
         self._open = False
+        self._stop_requested = False
+
+    def request_stop(self) -> None:
+        """Ask a running frames() loop to exit promptly — even a live camera
+        waiting on a (hardware-triggered) frame that may never come."""
+        self._stop_requested = True
 
     @property
     def is_open(self) -> bool:
@@ -49,6 +55,7 @@ class CameraDevice(ABC):
 
     def open(self) -> CameraDevice:
         if not self._open:
+            self._stop_requested = False
             self._open_device()
             self._open = True
             self._on_settings(self.settings)
@@ -66,11 +73,12 @@ class CameraDevice(ABC):
 
     def frames(self, limit: int | None = None) -> Iterator[Frame]:
         self.open()
+        self._stop_requested = False
         count = 0
-        while limit is None or count < limit:
+        while (limit is None or count < limit) and not self._stop_requested:
             frame = self.grab()
             if frame is None:
-                break
+                break  # bounded source exhausted (a file/sim reaching its end)
             yield frame
             count += 1
 

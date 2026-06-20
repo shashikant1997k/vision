@@ -42,6 +42,10 @@ class HarvesterCamera(CameraDevice):
         self._harvester = None
         self._acquirer = None
         self._count = 0
+        # how long a single grab waits for a frame before giving up (and the
+        # loop checks for stop / tolerates a hardware-trigger gap). Short so Stop
+        # is responsive; frames() tolerates a None so gaps don't end acquisition.
+        self._grab_timeout = float(os.environ.get("VIS_GRAB_TIMEOUT", "1.0"))
 
     def _make_harvester(self):
         try:
@@ -54,6 +58,19 @@ class HarvesterCamera(CameraDevice):
             raise RuntimeError(
                 "no GenTL producer (.cti) configured; pass cti_path or set VIS_GENTL_CTI"
             )
+        if not os.path.exists(self.cti_path):
+            raise RuntimeError(
+                f"GenTL producer not found at {self.cti_path!r}; "
+                "check the path / VIS_GENTL_CTI (e.g. Baumer's bgapi2_gige.cti)"
+            )
+        # The producer's dependent DLLs sit next to the .cti; make them
+        # loadable (Windows won't search the .cti's own dir otherwise).
+        bindir = os.path.dirname(self.cti_path)
+        try:
+            os.add_dll_directory(bindir)
+        except (AttributeError, OSError):
+            pass
+        os.environ["PATH"] = bindir + os.pathsep + os.environ.get("PATH", "")
         harvester = Harvester()
         harvester.add_file(self.cti_path)
         harvester.update()
@@ -61,7 +78,21 @@ class HarvesterCamera(CameraDevice):
 
     def _open_device(self) -> None:
         self._harvester = self._make_harvester()
-        self._acquirer = self._harvester.create(self.device_index)
+        # No camera (unplugged / wrong subnet / held by another app) leaves the
+        # device list empty; harvesters then raises a bare IndexError on create.
+        # Translate both that and an out-of-range index into a clear message.
+        if not self._harvester.device_info_list:
+            raise RuntimeError(
+                "no GigE Vision cameras found via the GenTL producer; check the "
+                "camera is powered, linked, and on a reachable subnet"
+            )
+        try:
+            self._acquirer = self._harvester.create(self.device_index)
+        except IndexError as exc:
+            raise RuntimeError(
+                f"no camera at device index {self.device_index}; "
+                f"{len(self._harvester.device_info_list)} device(s) detected"
+            ) from exc
         self._count = 0
 
     def _close_device(self) -> None:
@@ -78,6 +109,19 @@ class HarvesterCamera(CameraDevice):
 
     def _on_settings(self, s: CameraSettings) -> None:
         node_map = self._acquirer.remote_device.node_map
+        # Several GenICam features (packet size, AOI, pixel format) are LOCKED
+        # while acquisition runs — writing them mid-stream stalls the camera and
+        # hangs the caller. Always stop, apply, then restart. This is what makes
+        # "Apply" in the Settings screen safe.
+        was_acquiring = getattr(self._acquirer, "is_acquiring", lambda: False)()
+        if was_acquiring:
+            try:
+                self._acquirer.stop()
+            except Exception:
+                pass
+        # Keep the stream packet size within the NIC MTU (1500). A camera left
+        # with a jumbo default streams nothing on a non-jumbo NIC.
+        _try_set(node_map, "GevSCPSPacketSize", 1500)
         _try_set(node_map, "ExposureTime", float(s.exposure_us))
         _try_set(node_map, "Gain", float(s.gain_db))
         if s.frame_rate:
@@ -87,20 +131,49 @@ class HarvesterCamera(CameraDevice):
             _try_set(node_map, "Height", int(s.sensor_roi.h))
             _try_set(node_map, "OffsetX", int(s.sensor_roi.x))
             _try_set(node_map, "OffsetY", int(s.sensor_roi.y))
+        # TriggerMode must be set per TriggerSelector; setting it blind can
+        # silently no-op and leave a camera stuck waiting for a hardware pulse
+        # (the VCXG-24C ships selector=FrameStart, source=Line0). For a hardware
+        # trigger the sensor pulses TriggerSource (e.g. Line0) per product.
         if s.trigger.mode == TriggerMode.CONTINUOUS:
-            _try_set(node_map, "TriggerMode", "Off")
+            for sel in ("FrameStart", "AcquisitionStart"):
+                _try_set(node_map, "TriggerSelector", sel)
+                _try_set(node_map, "TriggerMode", "Off")
         else:
+            _try_set(node_map, "TriggerSelector", "FrameStart")
             _try_set(node_map, "TriggerMode", "On")
             if s.trigger.source:
                 _try_set(node_map, "TriggerSource", s.trigger.source)
-        # start streaming once configured
-        if not getattr(self._acquirer, "is_acquiring", lambda: False)():
+            if s.trigger.delay_us:
+                _try_set(node_map, "TriggerDelay", float(s.trigger.delay_us))
+        # (re)start streaming once configured
+        try:
             self._acquirer.start()
+        except Exception:
+            pass
 
-    def grab(self) -> Frame | None:
-        with self._acquirer.fetch() as buffer:
-            comp = buffer.payload.components[0]
-            image = comp.data.reshape(comp.height, comp.width).copy()  # mono; color TODO
+    def frames(self, limit: int | None = None):
+        # Live camera: a missing frame means "none yet" (waiting on a trigger or
+        # a transient stall), NOT end-of-stream — keep waiting instead of ending
+        # acquisition. request_stop()/stop budget bounds how long we block.
+        self.open()
+        self._stop_requested = False
+        count = 0
+        while (limit is None or count < limit) and not self._stop_requested:
+            frame = self.grab()
+            if frame is None:
+                continue
+            yield frame
+            count += 1
+
+    def grab(self, timeout: float | None = None) -> Frame | None:
+        t = self._grab_timeout if timeout is None else timeout
+        try:
+            with self._acquirer.fetch(timeout=t) as buffer:
+                comp = buffer.payload.components[0]
+                image = comp.data.reshape(comp.height, comp.width).copy()  # mono; color TODO
+        except Exception:
+            return None  # timeout / transient stall — no frame this cycle
         frame_id = self._count
         self._count += 1
         return Frame(self.info.id, frame_id, image, timestamp=float(frame_id))

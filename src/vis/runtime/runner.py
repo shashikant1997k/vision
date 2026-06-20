@@ -90,6 +90,12 @@ class InspectionRunner:
 
     def stop(self) -> None:
         self._stop.set()
+        # nudge each camera's frames() loop to exit now, even if it's blocked
+        # waiting on a (hardware-triggered) frame that may never arrive
+        for camera, _recipe in self.assignments:
+            req = getattr(camera, "request_stop", None)
+            if callable(req):
+                req()
 
     def join(self) -> None:
         for thread in self._threads:

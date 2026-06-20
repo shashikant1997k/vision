@@ -16,6 +16,17 @@ class Perm:
     AUDIT_VIEW = "audit.view"
 
 
+# All assignable rights with operator-facing labels (drives the role-rights UI).
+ALL_PERMS: list[tuple[str, str]] = [
+    (Perm.RECIPE_CREATE, "Create / edit recipes (teach)"),
+    (Perm.RECIPE_APPROVE, "Approve recipes (e-sign)"),
+    (Perm.BATCH_MANAGE, "Manage batches (start/stop, run)"),
+    (Perm.STATION_MANAGE, "Configure hardware (cameras, I/O, comms)"),
+    (Perm.USER_MANAGE, "Manage users & roles"),
+    (Perm.AUDIT_VIEW, "View audit trail & reports"),
+]
+
+
 # Default role presets. Customers can adjust per their SOP.
 DEFAULT_ROLES: dict[str, list[str]] = {
     "admin": [

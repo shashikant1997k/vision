@@ -26,6 +26,8 @@ class User(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     username: Mapped[str] = mapped_column(String(64), unique=True)
     full_name: Mapped[str] = mapped_column(String(128), default="")
+    email: Mapped[str] = mapped_column(String(128), default="")
+    phone: Mapped[str] = mapped_column(String(40), default="")
     password_hash: Mapped[str] = mapped_column(String(256), default="")
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     failed_attempts: Mapped[int] = mapped_column(Integer, default=0)

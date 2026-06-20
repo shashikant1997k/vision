@@ -67,5 +67,5 @@ def test_admin_window_user_lifecycle(tmp_path):
     win._refresh_users()
     rows = {win._users_table.item(r, 1).text(): r for r in range(win._users_table.rowCount())}
     assert "op2" in rows
-    status = win._users_table.item(rows["op2"], 4).text()
+    status = win._users_table.item(rows["op2"], 5).text()  # ID,User,Name,Email,Roles,Status
     assert status == "disabled"

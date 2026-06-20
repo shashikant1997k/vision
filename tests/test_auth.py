@@ -47,6 +47,47 @@ def test_authenticate_and_permissions(tmp_path):
         assert verify_user(s, uid, "Secret123")
 
 
+def test_role_rights_management_and_copy(tmp_path):
+    sf = _sf(tmp_path)
+    users = UserService(sf)
+    users.seed_roles()
+    admin = users.create_user("adm", "Secret123", roles=("admin",))
+    op = users.create_user("op", "Secret123", roles=("operator",))
+
+    # a plain operator (no USER_MANAGE) cannot manage roles
+    with pytest.raises(PermissionError):
+        users.set_role_permissions(op, "operator", [Perm.USER_MANAGE])
+
+    # create a role, grant a right, assign it to a user -> permission takes effect
+    users.create_role(admin, "line_lead")
+    users.set_role_permissions(admin, "line_lead", [Perm.RECIPE_CREATE, Perm.AUDIT_VIEW])
+    users.set_roles(admin, op, ("line_lead",))
+    with sf() as s:
+        assert has_permission(s, op, Perm.RECIPE_CREATE)
+        assert not has_permission(s, op, Perm.STATION_MANAGE)
+
+    # copy rights from admin onto line_lead -> now has the full admin set
+    users.copy_role_permissions(admin, "admin", "line_lead")
+    with sf() as s:
+        assert has_permission(s, op, Perm.STATION_MANAGE)
+
+    # delete unassigns from users
+    users.set_roles(admin, op, ("operator",))
+    users.delete_role(admin, "line_lead")
+    assert "line_lead" not in users.list_roles()
+
+
+def test_admin_create_user_stores_email_phone(tmp_path):
+    sf = _sf(tmp_path)
+    users = UserService(sf)
+    users.seed_roles()
+    admin = users.create_user("adm", "Secret123", roles=("admin",))
+    users.admin_create_user(admin, "jane", "Secret123", "Jane Q", ("operator",),
+                            email="jane@x.com", phone="555-1")
+    jane = next(u for u in users.list_users() if u["username"] == "jane")
+    assert jane["email"] == "jane@x.com" and jane["phone"] == "555-1"
+
+
 def test_account_lockout_after_repeated_failures(tmp_path):
     sf = _sf(tmp_path)
     users = UserService(sf)

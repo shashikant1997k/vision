@@ -3,12 +3,15 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QDialog,
     QFormLayout,
+    QGroupBox,
     QHBoxLayout,
     QInputDialog,
     QLabel,
     QLineEdit,
+    QListWidget,
     QMainWindow,
     QPushButton,
     QTableWidget,
@@ -30,12 +33,16 @@ class _NewUserDialog(QDialog):
         self.setWindowTitle("New user")
         self._username = QLineEdit()
         self._fullname = QLineEdit()
+        self._email = QLineEdit()
+        self._phone = QLineEdit()
         self._password = QLineEdit()
         self._password.setEchoMode(QLineEdit.Password)
         self._roles = {r: QCheckBox(r) for r in roles}
         form = QFormLayout()
         form.addRow("Username", self._username)
         form.addRow("Full name", self._fullname)
+        form.addRow("Email", self._email)
+        form.addRow("Phone", self._phone)
         form.addRow("Password", self._password)
         for cb in self._roles.values():
             form.addRow("", cb)
@@ -49,6 +56,7 @@ class _NewUserDialog(QDialog):
         return (
             self._username.text().strip(), self._password.text(), self._fullname.text().strip(),
             tuple(r for r, cb in self._roles.items() if cb.isChecked()),
+            self._email.text().strip(), self._phone.text().strip(),
         )
 
 
@@ -75,6 +83,8 @@ class AdminWindow(QMainWindow):
         self._batches_table = self._audit_table = None
         if Perm.USER_MANAGE in perms:
             tabs.addTab(self._users_tab(), "Users")
+            tabs.addTab(self._roles_tab(), "Roles & rights")
+            tabs.addTab(self._system_tab(), "System")
         if Perm.RECIPE_CREATE in perms:
             tabs.addTab(self._products_tab(), "Products")
         if Perm.BATCH_MANAGE in perms:
@@ -124,7 +134,7 @@ class AdminWindow(QMainWindow):
 
     # ---- Users -------------------------------------------------------------
     def _users_tab(self):
-        self._users_table = self._table(["ID", "Username", "Name", "Roles", "Status"])
+        self._users_table = self._table(["ID", "Username", "Name", "Email", "Roles", "Status"])
         new = QPushButton("New user…")
         new.clicked.connect(self._new_user)
         roles = QPushButton("Edit roles…")
@@ -137,7 +147,7 @@ class AdminWindow(QMainWindow):
 
     def _refresh_users(self):
         rows = [
-            (u["id"], u["username"], u["full_name"], ", ".join(u["roles"]),
+            (u["id"], u["username"], u["full_name"], u.get("email", ""), ", ".join(u["roles"]),
              ("locked" if u["locked"] else ("active" if u["active"] else "disabled")))
             for u in self._users.list_users()
         ]
@@ -147,12 +157,13 @@ class AdminWindow(QMainWindow):
         dlg = _NewUserDialog(self._users.list_roles(), self)
         if dlg.exec() != QDialog.Accepted:
             return
-        username, password, full_name, roles = dlg.values()
+        username, password, full_name, roles, email, phone = dlg.values()
         if not username or not password:
             self._status.setText("Username and password are required.")
             return
         try:
-            self._users.admin_create_user(self._uid, username, password, full_name, roles)
+            self._users.admin_create_user(self._uid, username, password, full_name, roles,
+                                          email=email, phone=phone)
         except Exception as exc:
             self._status.setText(f"Create failed: {exc}")
             return
@@ -208,6 +219,165 @@ class AdminWindow(QMainWindow):
             return
         self._refresh_users()
         self._refresh_audit()
+
+    # ---- Roles & rights ----------------------------------------------------
+    def _roles_tab(self):
+        from ..security.authz import ALL_PERMS
+
+        self._roles_list = QListWidget()
+        self._roles_list.currentTextChanged.connect(self._load_role_perms)
+        self._perm_checks: dict[str, QCheckBox] = {}
+        perms_form = QFormLayout()
+        for code, label in ALL_PERMS:
+            cb = QCheckBox(label)
+            self._perm_checks[code] = cb
+            perms_form.addRow("", cb)
+        perms_box = QGroupBox("Rights for the selected role")
+        perms_box.setLayout(perms_form)
+
+        new = QPushButton("New role…")
+        new.clicked.connect(self._new_role)
+        delete = QPushButton("Delete role")
+        delete.clicked.connect(self._delete_role)
+        copy = QPushButton("Copy rights from…")
+        copy.clicked.connect(self._copy_rights)
+        save = QPushButton("Save rights")
+        save.setProperty("variant", "primary")
+        save.clicked.connect(self._save_role_perms)
+
+        left = QVBoxLayout()
+        left.addWidget(QLabel("Roles"))
+        left.addWidget(self._roles_list, 1)
+        for b in (new, delete, copy):
+            left.addWidget(b)
+        right = QVBoxLayout()
+        right.addWidget(perms_box, 1)
+        right.addWidget(save)
+        body = QHBoxLayout()
+        lw = QWidget(); lw.setLayout(left)
+        rw = QWidget(); rw.setLayout(right)
+        body.addWidget(lw, 1)
+        body.addWidget(rw, 2)
+        w = QWidget()
+        w.setLayout(body)
+        self._refresh_roles()
+        return w
+
+    def _refresh_roles(self):
+        self._roles_list.clear()
+        for role in self._users.list_roles_detailed():
+            self._roles_list.addItem(role["name"])
+        if self._roles_list.count():
+            self._roles_list.setCurrentRow(0)
+
+    def _load_role_perms(self, name: str):
+        perms = next((r["permissions"] for r in self._users.list_roles_detailed()
+                      if r["name"] == name), [])
+        for code, cb in self._perm_checks.items():
+            cb.setChecked(code in perms)
+
+    def _selected_role(self) -> str | None:
+        item = self._roles_list.currentItem()
+        return item.text() if item else None
+
+    def _save_role_perms(self):
+        name = self._selected_role()
+        if name is None:
+            return
+        perms = [code for code, cb in self._perm_checks.items() if cb.isChecked()]
+        try:
+            self._users.set_role_permissions(self._uid, name, perms)
+            self._status.setText(f"Rights saved for role '{name}'.")
+        except Exception as exc:
+            self._status.setText(f"Failed: {exc}")
+        self._refresh_audit()
+
+    def _new_role(self):
+        name, ok = QInputDialog.getText(self, "New role", "Role name:")
+        if not ok or not name.strip():
+            return
+        try:
+            self._users.create_role(self._uid, name.strip())
+        except Exception as exc:
+            self._status.setText(f"Failed: {exc}")
+            return
+        self._refresh_roles()
+        self._roles_list.setCurrentRow(self._roles_list.count() - 1)
+        self._refresh_audit()
+
+    def _delete_role(self):
+        name = self._selected_role()
+        if name is None:
+            return
+        try:
+            self._users.delete_role(self._uid, name)
+            self._status.setText(f"Role '{name}' deleted.")
+        except Exception as exc:
+            self._status.setText(f"Failed: {exc}")
+            return
+        self._refresh_roles()
+        self._refresh_audit()
+
+    def _copy_rights(self):
+        target = self._selected_role()
+        if target is None:
+            return
+        others = [r["name"] for r in self._users.list_roles_detailed() if r["name"] != target]
+        if not others:
+            self._status.setText("No other role to copy from.")
+            return
+        source, ok = QInputDialog.getItem(
+            self, "Copy rights", f"Copy rights INTO '{target}' from:", others, 0, False
+        )
+        if not ok:
+            return
+        try:
+            self._users.copy_role_permissions(self._uid, source, target)
+            self._status.setText(f"Copied rights from '{source}' into '{target}'.")
+        except Exception as exc:
+            self._status.setText(f"Failed: {exc}")
+            return
+        self._load_role_perms(target)
+        self._refresh_audit()
+
+    # ---- System / site settings -------------------------------------------
+    def _system_tab(self):
+        from ..db.app_settings import SettingsService
+
+        cfg = SettingsService(self._sf).get("system") or {}
+        self._sys_line = QLineEdit(cfg.get("line_name", ""))
+        self._sys_id = QLineEdit(cfg.get("system_id", ""))
+        self._sys_company = QLineEdit(cfg.get("company", ""))
+        self._sys_gui_date = QLineEdit(cfg.get("gui_date_format", "yyyy-MM-dd HH:mm"))
+        self._sys_report_date = QLineEdit(cfg.get("report_date_format", "yyyy-MM-dd"))
+        form = QFormLayout()
+        form.addRow("Line name", self._sys_line)
+        form.addRow("System ID", self._sys_id)
+        form.addRow("Company", self._sys_company)
+        form.addRow("GUI date format", self._sys_gui_date)
+        form.addRow("Report date format", self._sys_report_date)
+        save = QPushButton("Save system settings")
+        save.setProperty("variant", "primary")
+        save.clicked.connect(self._save_system)
+        layout = QVBoxLayout()
+        layout.addLayout(form)
+        layout.addWidget(save)
+        layout.addStretch(1)
+        w = QWidget()
+        w.setLayout(layout)
+        return w
+
+    def _save_system(self):
+        from ..db.app_settings import SettingsService
+
+        SettingsService(self._sf).set("system", {
+            "line_name": self._sys_line.text().strip(),
+            "system_id": self._sys_id.text().strip(),
+            "company": self._sys_company.text().strip(),
+            "gui_date_format": self._sys_gui_date.text().strip(),
+            "report_date_format": self._sys_report_date.text().strip(),
+        })
+        self._status.setText("System settings saved.")
 
     # ---- Products ----------------------------------------------------------
     def _products_tab(self):

@@ -72,6 +72,67 @@ class UserService:
         with self._sf() as s:
             return [r.name for r in s.execute(select(Role).order_by(Role.name)).scalars()]
 
+    def list_roles_detailed(self) -> list[dict]:
+        """Each role with its assigned permission codes — drives the rights UI."""
+        with self._sf() as s:
+            return [
+                {"name": r.name, "permissions": list(r.permissions or [])}
+                for r in s.execute(select(Role).order_by(Role.name)).scalars()
+            ]
+
+    def create_role(self, by_user: int, name: str, permissions: tuple[str, ...] = ()) -> None:
+        name = (name or "").strip()
+        if not name:
+            raise ValueError("role name is required")
+        with self._sf() as s:
+            require(s, by_user, Perm.USER_MANAGE)
+            if s.execute(select(Role).where(Role.name == name)).scalars().first():
+                raise ValueError(f"role {name!r} already exists")
+            s.add(Role(name=name, permissions=list(permissions)))
+            AuditService(s).record("role.create", "role", None, user_id=by_user,
+                                   after={"name": name, "permissions": list(permissions)})
+            s.commit()
+
+    def delete_role(self, by_user: int, name: str) -> None:
+        with self._sf() as s:
+            require(s, by_user, Perm.USER_MANAGE)
+            role = s.execute(select(Role).where(Role.name == name)).scalars().first()
+            if role is None:
+                raise ValueError(f"unknown role {name!r}")
+            for ur in s.execute(select(UserRole).where(UserRole.role_id == role.id)).scalars().all():
+                s.delete(ur)  # unassign from every user first
+            s.delete(role)
+            AuditService(s).record("role.delete", "role", role.id, user_id=by_user,
+                                   before={"name": name})
+            s.commit()
+
+    def set_role_permissions(self, by_user: int, name: str, permissions) -> None:
+        with self._sf() as s:
+            require(s, by_user, Perm.USER_MANAGE)
+            role = s.execute(select(Role).where(Role.name == name)).scalars().first()
+            if role is None:
+                raise ValueError(f"unknown role {name!r}")
+            before = list(role.permissions or [])
+            role.permissions = list(permissions)
+            AuditService(s).record("role.permissions", "role", role.id, user_id=by_user,
+                                   before={"permissions": before},
+                                   after={"permissions": list(permissions)})
+            s.commit()
+
+    def copy_role_permissions(self, by_user: int, source: str, target: str) -> None:
+        """Copy the rights of one role onto another (CodeScan 'copy rights')."""
+        with self._sf() as s:
+            require(s, by_user, Perm.USER_MANAGE)
+            src = s.execute(select(Role).where(Role.name == source)).scalars().first()
+            dst = s.execute(select(Role).where(Role.name == target)).scalars().first()
+            if src is None or dst is None:
+                raise ValueError("both source and target roles must exist")
+            dst.permissions = list(src.permissions or [])
+            AuditService(s).record("role.copy_rights", "role", dst.id, user_id=by_user,
+                                   after={"from": source, "to": target,
+                                          "permissions": list(dst.permissions)})
+            s.commit()
+
     def _roles_of(self, s, user_id: int) -> list[str]:
         rows = s.execute(select(UserRole).where(UserRole.user_id == user_id)).scalars().all()
         names = []
@@ -87,17 +148,19 @@ class UserService:
             for u in s.execute(select(User).order_by(User.username)).scalars():
                 out.append({
                     "id": u.id, "username": u.username, "full_name": u.full_name,
+                    "email": u.email, "phone": u.phone,
                     "active": u.active, "locked": u.locked, "last_login": u.last_login,
                     "roles": self._roles_of(s, u.id),
                 })
             return out
 
     def admin_create_user(self, by_user: int, username: str, password: str,
-                          full_name: str = "", roles: tuple[str, ...] = ()) -> int:
+                          full_name: str = "", roles: tuple[str, ...] = (),
+                          email: str = "", phone: str = "") -> int:
         self.policy.validate(password)
         with self._sf() as s:
             require(s, by_user, Perm.USER_MANAGE)
-            user = User(username=username, full_name=full_name,
+            user = User(username=username, full_name=full_name, email=email, phone=phone,
                         password_hash=hash_password(password), active=True)
             s.add(user)
             s.flush()

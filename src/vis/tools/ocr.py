@@ -306,6 +306,27 @@ def recognize(roi_image, accept=None) -> tuple[str, float]:
     return best
 
 
+_DIGIT_FOLD = str.maketrans({
+    "O": "0", "o": "0", "Q": "0", "D": "0", "I": "1", "l": "1", "L": "1",
+    "|": "1", "Z": "2", "S": "5", "B": "8", "G": "6", "T": "7", "A": "4", "g": "9",
+})
+
+
+def _apply_charset(text: str, charset: str) -> str:
+    """Constrain a read to an allowed character subset (the OCV 'character
+    subset'/whitelist). For digit fields, fold lookalike letters to digits and
+    drop the rest, so a date misread 'O1/2O25' resolves to '01/2025'. Box the
+    VALUE (not the 'MFG.'/'EXP.' label) for this to be clean."""
+    if charset == "digits":
+        folded = text.translate(_DIGIT_FOLD)
+        return "".join(c for c in folded if c.isdigit() or c in "/.-: ").strip()
+    if charset == "letters":
+        return "".join(c for c in text if c.isalpha() or c == " ").strip()
+    if charset == "alnum":
+        return "".join(c for c in text if c.isalnum() or c == " ").strip()
+    return text
+
+
 def _normalize(text: str, config: dict) -> str:
     if config.get("strip", True):
         text = text.strip()
@@ -375,6 +396,9 @@ class OcrTextTool(InspectionTool):
                 if better:
                     best_text, best_score = t2, s2
             text, score = best_text, best_score
+        charset = self.config.get("charset")
+        if charset:  # constrain to the allowed character subset (e.g. digits-only dates)
+            text = _apply_charset(text, charset)
         # `measured` is the raw read shown to the operator (keeps punctuation);
         # matching is done on alphanumeric keys so a '.'/',' OCR slip, a missing
         # dot, or extra spaces never causes a false reject.

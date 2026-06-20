@@ -905,7 +905,8 @@ class TeachWindow(QMainWindow):
             self._t_search_y.setValue(int(tool.config.get("search_y", _legacy) or 0))
             is_font_tool = tool.tool_type == "ocv_font"
             self._tool_form.setRowVisible(self._t_font, is_font_tool)
-            self._tool_form.setRowVisible(self._t_charset, is_font_tool)
+            # charset (character subset) helps OCR too — e.g. digits-only dates
+            self._tool_form.setRowVisible(self._t_charset, tool.tool_type in ("ocv_font", "ocv_text"))
             idx = self._t_charset.findData((tool.config or {}).get("charset", "") or "")
             self._t_charset.setCurrentIndex(idx if idx >= 0 else 0)
             if is_font_tool:
@@ -1031,8 +1032,8 @@ class TeachWindow(QMainWindow):
             for key in FONT_KEYS:  # the trained font must survive match edits
                 if key in (tool.config or {}):
                     cfg[key] = tool.config[key]
-            if self._t_charset.currentData():
-                cfg["charset"] = self._t_charset.currentData()
+        if tool.tool_type in ("ocv_font", "ocv_text") and self._t_charset.currentData():
+            cfg["charset"] = self._t_charset.currentData()  # digits-only dates etc.
         tool.config = cfg
         self._t_value.setPlaceholderText(value_hint(tool.tool_type, mode))
         self._sync_tool_inputs(mode)

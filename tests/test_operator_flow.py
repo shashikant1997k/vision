@@ -69,6 +69,30 @@ def test_admin_sees_everything(tmp_path):
         assert not w.isHidden()
 
 
+def test_in_place_panel_navigation(tmp_path):
+    """Sidebar screens render in the content stack (not pop-up windows), tear
+    down the previous panel when switching, and home returns to the live view."""
+    _qapp()
+    sf, users = _setup(tmp_path)
+    admin = users.create_user("boss", "Secret123", roles=("admin",))
+    from vis.hmi.main_window import MainWindow
+
+    win = MainWindow(username="boss", recipe=build_code_demo_recipe(),
+                     camera_factory=_factory(), session_factory=sf, user_id=admin)
+    live = win._live_page
+    win.open_admin()
+    assert win._content_stack.currentWidget() is not live
+    assert win._sidebar_widget.isHidden()  # auto-collapsed after navigation
+    prev = win._current_panel_window
+    win.open_comms()  # switching panels replaces the previous one
+    assert win._content_stack.currentWidget() is not live
+    assert win._current_panel_window is not prev
+    win._navigate_home()
+    assert win._content_stack.currentWidget() is live
+    assert not win._sidebar_widget.isHidden()
+    assert win._current_panel_window is None
+
+
 def test_consecutive_reject_alarm_stops_the_line(tmp_path):
     _qapp()
     sf, users = _setup(tmp_path)

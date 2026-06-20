@@ -275,8 +275,13 @@ class MainWindow(QMainWindow):
         # --- left sidebar: vertical nav, full-width buttons, grouped ---
         self._start.setMinimumHeight(40)
         self._stop.setMinimumHeight(40)
+        self._home_btn = QPushButton("⌂  Live view")
+        self._home_btn.setMinimumHeight(34)
+        self._home_btn.setToolTip("Back to the live inspection view")
+        self._home_btn.clicked.connect(self._navigate_home)
         sidebar = QVBoxLayout()
         sidebar.setSpacing(5)
+        sidebar.addWidget(self._home_btn)
         sidebar.addWidget(_section_label("RUN"))
         sidebar.addWidget(self._start)
         sidebar.addWidget(self._stop)
@@ -350,7 +355,7 @@ class MainWindow(QMainWindow):
         )
 
         # the camera feed vs. info panel split is draggable (resizable feed)
-        from PySide6.QtWidgets import QSplitter
+        from PySide6.QtWidgets import QSplitter, QStackedWidget
 
         content_split = QSplitter(Qt.Horizontal)
         content_split.addWidget(feed_widget)
@@ -360,10 +365,21 @@ class MainWindow(QMainWindow):
         content_split.setSizes([820, 360])
         content_split.setChildrenCollapsible(False)
 
+        # the content area is a stack: the live page (feed+info) plus any screen
+        # navigated to from the sidebar — shown in place, never as a pop-up window
+        self._live_page = QWidget()
+        live_layout = QVBoxLayout(self._live_page)
+        live_layout.setContentsMargins(0, 0, 0, 0)
+        live_layout.addWidget(content_split)
+        self._content_stack = QStackedWidget()
+        self._content_stack.addWidget(self._live_page)
+        self._current_panel_window = None
+        self._current_panel_central = None
+
         body = QHBoxLayout()
         body.setSpacing(10)
         body.addWidget(sidebar_widget, 0)
-        body.addWidget(content_split, 1)
+        body.addWidget(self._content_stack, 1)
         body_widget = QWidget()
         body_widget.setLayout(body)
 
@@ -762,9 +778,7 @@ class MainWindow(QMainWindow):
             return
         from .events_window import EventsWindow
 
-        self._events_window = EventsWindow(self._sf, self)
-        self._events_window.resize(760, 480)
-        self._events_window.show()
+        self._show_panel(lambda: EventsWindow(self._sf, self))
 
     def open_comms(self) -> None:
         if self._sf is None:
@@ -772,11 +786,10 @@ class MainWindow(QMainWindow):
             return
         from .comms_window import CommsWindow
 
-        self._comms_window = CommsWindow(
-            self._sf, apply_callback=self._apply_comms, status_provider=self.comms_status, parent=self
-        )
-        self._comms_window.resize(520, 620)
-        self._comms_window.show()
+        self._show_panel(lambda: CommsWindow(
+            self._sf, apply_callback=self._apply_comms,
+            status_provider=self.comms_status, parent=self,
+        ))
 
     def closeEvent(self, event) -> None:  # fail-safe: drop READY, stop server
         if self._signals is not None:
@@ -927,9 +940,7 @@ class MainWindow(QMainWindow):
             return
         from .font_window import FontManagerWindow
 
-        self._fonts_window = FontManagerWindow(self._sf, self._user_id, self)
-        self._fonts_window.resize(640, 420)
-        self._fonts_window.show()
+        self._show_panel(lambda: FontManagerWindow(self._sf, self._user_id, self))
 
     def open_stations(self) -> None:
         """Open the station/camera admin (define cameras + assign recipes)."""
@@ -938,9 +949,7 @@ class MainWindow(QMainWindow):
             return
         from .station_window import StationConfigWindow
 
-        self._stations_window = StationConfigWindow(self._sf, self._user_id, self)
-        self._stations_window.resize(560, 480)
-        self._stations_window.show()
+        self._show_panel(lambda: StationConfigWindow(self._sf, self._user_id, self))
 
     def open_admin(self) -> None:
         """Open the admin hub: users, products, batches & reports, audit log."""
@@ -949,9 +958,9 @@ class MainWindow(QMainWindow):
             return
         from .admin_window import AdminWindow
 
-        self._admin_window = AdminWindow(self._sf, self._user_id, report_dir=self._report_dir, parent=self)
-        self._admin_window.resize(820, 560)
-        self._admin_window.show()
+        self._show_panel(lambda: AdminWindow(
+            self._sf, self._user_id, report_dir=self._report_dir, parent=self,
+        ))
 
     def open_review(self) -> None:
         """Open the reject-review filmstrip over the captured failed images."""
@@ -960,9 +969,7 @@ class MainWindow(QMainWindow):
             return
         from .review_window import ReviewWindow
 
-        self._review_window = ReviewWindow(self._failed_log, self._recipe, self)
-        self._review_window.resize(900, 600)
-        self._review_window.show()
+        self._show_panel(lambda: ReviewWindow(self._failed_log, self._recipe, self))
 
     def open_teach(self) -> None:
         """New recipe: open live Teach (button slot — no recipe to edit)."""
@@ -1115,7 +1122,7 @@ class MainWindow(QMainWindow):
         from .teach_window import TeachWindow
 
         lanes = sorted({region.reject_output for region in self._recipe.regions})
-        self._teach_window = TeachWindow(
+        self._show_panel(lambda: TeachWindow(
             user_id=self._user_id,
             reference_image=images[0],
             reference_images=images,
@@ -1124,9 +1131,8 @@ class MainWindow(QMainWindow):
             recipe=recipe,
             image_provider=image_provider,
             on_close=on_close,
-        )
-        self._teach_window.resize(1040, 600)
-        self._teach_window.show()
+            parent=self,
+        ))
 
     def _free_run_settings(self):
         """The saved camera settings, but forced to free-run — for any preview /
@@ -1151,6 +1157,49 @@ class MainWindow(QMainWindow):
     def _toggle_sidebar(self) -> None:
         """Collapse/expand the left menu so the content can go full-width."""
         self._sidebar_widget.setVisible(not self._sidebar_widget.isVisible())
+
+    # ---- in-place panel navigation (screens shown in the content area) -----
+    def _leave_current_panel(self) -> None:
+        """Tear down the panel currently shown (runs its closeEvent so cameras /
+        timers are released), and drop it from the content stack."""
+        win = self._current_panel_window
+        self._current_panel_window = None
+        if win is None:
+            return
+        central = self._current_panel_central
+        self._current_panel_central = None
+        if central is not None:
+            self._content_stack.removeWidget(central)
+            central.deleteLater()
+        try:
+            win.close()  # fires the window's own closeEvent → proper teardown
+        except Exception:
+            pass
+        win.deleteLater()
+
+    def _show_panel(self, builder) -> None:
+        """Build a screen (a QMainWindow) and show its content in place instead
+        of as a pop-up window; auto-collapse the sidebar for full-width."""
+        self._leave_current_panel()
+        try:
+            win = builder()
+        except Exception as exc:
+            self.statusBar().showMessage(f"Could not open: {exc}")
+            return
+        central = win.centralWidget() if hasattr(win, "centralWidget") else None
+        if central is None:
+            central = win
+        self._content_stack.addWidget(central)
+        self._content_stack.setCurrentWidget(central)
+        self._current_panel_window = win
+        self._current_panel_central = central
+        self._sidebar_widget.setVisible(False)  # full-width content after nav
+
+    def _navigate_home(self) -> None:
+        """Return to the live inspection view; show the menu again."""
+        self._leave_current_panel()
+        self._content_stack.setCurrentWidget(self._live_page)
+        self._sidebar_widget.setVisible(True)
 
     def _refresh_camera_status(self) -> None:
         """Probe the camera (off the GUI thread) and update the status bar.
@@ -1254,14 +1303,13 @@ class MainWindow(QMainWindow):
                 except Exception:
                     pass
 
-        self._settings_window = CameraSettingsWindow(
+        self._show_panel(lambda: CameraSettingsWindow(
             image_provider=provider,
             settings=load_settings(self._camera_id),
             apply_callback=apply_and_persist,
             cleanup_callback=cleanup,
-        )
-        self._settings_window.resize(900, 480)
-        self._settings_window.show()
+            parent=self,
+        ))
 
     def _update_results_table(self, snap: dict) -> None:
         """One row per camera/lane: counts plus a live ✓/✗ for the most recent

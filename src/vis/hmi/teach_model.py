@@ -162,6 +162,15 @@ class TeachModel:
         self.regions: list[Region] = []
         self.image_rotation = 0
 
+    @classmethod
+    def from_recipe(cls, recipe) -> "TeachModel":
+        """Load an existing recipe into an editable model (for Edit recipe)."""
+        m = cls(getattr(recipe, "product", "Recipe") or "Recipe",
+                getattr(recipe, "recipe_id", "recipe") or "recipe")
+        m.image_rotation = getattr(recipe, "image_rotation", 0) or 0
+        m.regions = list(recipe.regions)
+        return m
+
     def add_region(self, name: str, roi: ROI, reject_output: str) -> int:
         region_id = f"region{len(self.regions) + 1}"
         self.regions.append(Region(region_id, name, roi, reject_output, []))

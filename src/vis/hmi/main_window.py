@@ -96,6 +96,10 @@ class MainWindow(QMainWindow):
         self._reload_btn.setStyleSheet("padding: 6px 2px")
         self._reload_btn.setToolTip("Reload recipes from the database")
         self._reload_btn.clicked.connect(self._reload_recipes)
+        self._edit_recipe_btn = QPushButton("Edit…")
+        self._edit_recipe_btn.setFixedWidth(54)
+        self._edit_recipe_btn.setToolTip("Edit the selected recipe's products/inspections in Teach")
+        self._edit_recipe_btn.clicked.connect(self.edit_recipe)
         self._reload_recipes()
         self._batch_no = QLineEdit()
         self._batch_no.setPlaceholderText("batch no. (optional)")
@@ -201,6 +205,7 @@ class MainWindow(QMainWindow):
 
         for widget, perm in (
             (self._teach, Perm.RECIPE_CREATE),
+            (self._edit_recipe_btn, Perm.RECIPE_CREATE),
             (self._teach_files, Perm.RECIPE_CREATE),
             (self._emulate, Perm.RECIPE_CREATE),
             (self._import, Perm.RECIPE_CREATE),
@@ -229,6 +234,7 @@ class MainWindow(QMainWindow):
         # selectors appear only in multi-camera setups ---
         recipe_row = QHBoxLayout()
         recipe_row.addWidget(self._recipe_combo, 1)
+        recipe_row.addWidget(self._edit_recipe_btn)
         recipe_row.addWidget(self._reload_btn)
         job_form = QFormLayout()
         self._cam_recipe_combos = {self._camera_ids[0]: self._recipe_combo}
@@ -301,7 +307,7 @@ class MainWindow(QMainWindow):
         info.addWidget(self._close_batch)
         info_widget = QWidget()
         info_widget.setLayout(info)
-        info_widget.setMaximumWidth(380)
+        info_widget.setMinimumWidth(300)
         self._results_table.horizontalHeader().setMinimumSectionSize(46)
 
         # --- centre: camera feed (+ simulation banner) ---
@@ -343,11 +349,21 @@ class MainWindow(QMainWindow):
             "#headerBar{border-bottom:1px solid rgba(128,128,128,0.3)}"
         )
 
+        # the camera feed vs. info panel split is draggable (resizable feed)
+        from PySide6.QtWidgets import QSplitter
+
+        content_split = QSplitter(Qt.Horizontal)
+        content_split.addWidget(feed_widget)
+        content_split.addWidget(info_widget)
+        content_split.setStretchFactor(0, 1)
+        content_split.setStretchFactor(1, 0)
+        content_split.setSizes([820, 360])
+        content_split.setChildrenCollapsible(False)
+
         body = QHBoxLayout()
         body.setSpacing(10)
         body.addWidget(sidebar_widget, 0)
-        body.addWidget(feed_widget, 1)
-        body.addWidget(info_widget, 0)
+        body.addWidget(content_split, 1)
         body_widget = QWidget()
         body_widget.setLayout(body)
 
@@ -949,8 +965,33 @@ class MainWindow(QMainWindow):
         self._review_window.show()
 
     def open_teach(self) -> None:
+        """New recipe: open live Teach (button slot — no recipe to edit)."""
+        self._open_live_teach()
+
+    def edit_recipe(self) -> None:
+        """Edit the recipe currently selected in the dropdown (loads its ROIs)."""
+        rid = self._recipe_combo.currentData()
+        if rid is None:
+            self.statusBar().showMessage(
+                "Select a saved recipe in the dropdown to edit (not the built-in demo)."
+            )
+            return
+        if self._sf is None:
+            self.statusBar().showMessage("No database — cannot edit recipes.")
+            return
+        from ..db.store import RecipeRepository
+
+        try:
+            recipe = RecipeRepository(self._sf).load(int(rid))
+        except Exception as exc:
+            self.statusBar().showMessage(f"Could not load recipe: {exc}")
+            return
+        self._open_live_teach(recipe=recipe)
+
+    def _open_live_teach(self, recipe=None) -> None:
         """Open the live Teach screen on the camera: position the product, Snap to
-        freeze a reference, then mark up ROIs (industry-standard live teach)."""
+        freeze a reference, then mark up ROIs (industry-standard live teach). When
+        `recipe` is given, its products/inspections are loaded for editing."""
         try:
             source = self._camera_factory(self._camera_id, None, self._recipe)
         except Exception as exc:
@@ -1003,8 +1044,11 @@ class MainWindow(QMainWindow):
             if callable(close):
                 close()
 
-        self.statusBar().showMessage("Live teach — position the product, then Snap.")
-        self._open_teach_with_images([seed], image_provider=provider, on_close=on_close)
+        msg = "Live teach — edit recipe" if recipe is not None else "Live teach — new recipe"
+        self.statusBar().showMessage(f"{msg}: position the product, then Snap.")
+        self._open_teach_with_images(
+            [seed], image_provider=provider, on_close=on_close, recipe=recipe
+        )
 
     def open_teach_from_files(self) -> None:
         """Load product images from disk and teach on them (your own samples)."""
@@ -1066,7 +1110,8 @@ class MainWindow(QMainWindow):
             attr="_emulate_task",
         )
 
-    def _open_teach_with_images(self, images, image_provider=None, on_close=None) -> None:
+    def _open_teach_with_images(self, images, image_provider=None, on_close=None,
+                                recipe=None) -> None:
         from .teach_window import TeachWindow
 
         lanes = sorted({region.reject_output for region in self._recipe.regions})
@@ -1076,6 +1121,7 @@ class MainWindow(QMainWindow):
             reference_images=images,
             session_factory=self._sf,
             reject_lanes=lanes,
+            recipe=recipe,
             image_provider=image_provider,
             on_close=on_close,
         )

@@ -93,6 +93,7 @@ class TeachWindow(QMainWindow):
         product: str = "New Product",
         recipe_id: str = "recipe",
         reject_lanes: list[str] | None = None,
+        recipe=None,
         image_provider=None,
         on_close=None,
         parent=None,
@@ -105,7 +106,10 @@ class TeachWindow(QMainWindow):
         self._reference_index = 0
         self._reference = self._bank[0]
         self._sf = session_factory
-        self._model = TeachModel(product, recipe_id)
+        # editing an existing recipe loads its regions/tools; otherwise start fresh
+        self._model = TeachModel.from_recipe(recipe) if recipe is not None \
+            else TeachModel(product, recipe_id)
+        self._editing = recipe is not None
         self._saved_recipe_id: int | None = None
         self._lanes = reject_lanes or ["lane1", "lane2"]
         self._selected = None  # ("region", r) | ("tool", r, t) | None
@@ -125,8 +129,10 @@ class TeachWindow(QMainWindow):
 
         h, w = reference_image.shape[:2]
         # Start with one product covering the whole image (the common single-
-        # product case) so the user can immediately draw an inspection.
-        self._model.add_region("Product 1", ROI(0, 0, w, h), self._lanes[0])
+        # product case) so the user can immediately draw an inspection — unless
+        # we're editing a recipe that already has its products.
+        if not self._model.regions:
+            self._model.add_region("Product 1", ROI(0, 0, w, h), self._lanes[0])
 
         # --- image (drawable) ---
         self._image = ImageRoiLabel()

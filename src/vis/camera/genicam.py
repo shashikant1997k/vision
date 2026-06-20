@@ -152,6 +152,17 @@ class HarvesterCamera(CameraDevice):
         except Exception:
             pass
 
+    def set_exposure_gain(self, exposure_us=None, gain_db=None) -> None:
+        """Apply exposure/gain to the LIVE stream without stopping it — for a
+        real-time settings preview (both are settable while acquiring)."""
+        if self._acquirer is None:
+            return
+        node_map = self._acquirer.remote_device.node_map
+        if exposure_us is not None:
+            _try_set(node_map, "ExposureTime", float(exposure_us))
+        if gain_db is not None:
+            _try_set(node_map, "Gain", float(gain_db))
+
     def frames(self, limit: int | None = None):
         # Live camera: a missing frame means "none yet" (waiting on a trigger or
         # a transient stall), NOT end-of-stream — keep waiting instead of ending

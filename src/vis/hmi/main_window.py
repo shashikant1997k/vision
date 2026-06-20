@@ -1396,11 +1396,17 @@ class MainWindow(QMainWindow):
                 except Exception:
                     pass
 
+        def live_apply(exposure_us, gain_db):
+            fn = getattr(source, "set_exposure_gain", None)
+            if callable(fn):
+                fn(exposure_us=exposure_us, gain_db=gain_db)
+
         self._show_panel(lambda: CameraSettingsWindow(
             image_provider=provider,
             settings=load_settings(self._camera_id),
             apply_callback=apply_and_persist,
             cleanup_callback=cleanup,
+            live_callback=live_apply,
             parent=self,
         ))
 

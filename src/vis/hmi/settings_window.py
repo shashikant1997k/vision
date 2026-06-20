@@ -43,6 +43,7 @@ class CameraSettingsWindow(QMainWindow):
         settings: CameraSettings | None = None,
         apply_callback=None,
         cleanup_callback=None,
+        live_callback=None,
         session_factory=None,
         camera_db_id: int | None = None,
         user_id=None,
@@ -53,6 +54,7 @@ class CameraSettingsWindow(QMainWindow):
         self._image_provider = image_provider
         self._apply_callback = apply_callback
         self._cleanup_callback = cleanup_callback
+        self._live_callback = live_callback
         self._sf = session_factory
         self._camera_db_id = camera_db_id
         self._user_id = user_id
@@ -84,6 +86,15 @@ class CameraSettingsWindow(QMainWindow):
         self._gain_slider = QSlider(Qt.Horizontal)
         self._gain_slider.setRange(0, 480)
         _link_gain(self._gain, self._gain_slider)
+
+        # real-time preview: push exposure/gain to the live camera as they change
+        # (throttled so a slider drag doesn't flood the camera); Apply still saves
+        self._live_timer = QTimer(self)
+        self._live_timer.setSingleShot(True)
+        self._live_timer.setInterval(60)
+        self._live_timer.timeout.connect(self._live_apply)
+        self._exposure.valueChanged.connect(lambda *_: self._live_timer.start())
+        self._gain.valueChanged.connect(lambda *_: self._live_timer.start())
 
         exposure_form = QFormLayout()
         exposure_form.addRow("Exposure", self._exposure)
@@ -321,6 +332,15 @@ class CameraSettingsWindow(QMainWindow):
         score, percent = self._focus.update(image)
         self._focus_label.setText(f"focus: {score:.0f}  ({percent:.0f}% of best)")
 
+    def _live_apply(self) -> None:
+        """Push the current exposure/gain to the live camera for an instant
+        preview (not saved — Apply persists)."""
+        if self._live_callback is not None:
+            try:
+                self._live_callback(self._exposure.value(), self._gain.value())
+            except Exception:
+                pass
+
     def _apply(self) -> None:
         settings = self.settings_from_form()
         if self._apply_callback is not None:
@@ -350,10 +370,11 @@ class CameraSettingsWindow(QMainWindow):
         # Stop polling and release the camera source so it can be reopened
         # (a GigE camera is exclusively owned — a leaked handle blocks Teach
         # and any later Settings open).
-        try:
-            self._timer.stop()
-        except Exception:
-            pass
+        for timer in (getattr(self, "_timer", None), getattr(self, "_live_timer", None)):
+            try:
+                timer.stop()
+            except Exception:
+                pass
         if self._cleanup_callback is not None:
             try:
                 self._cleanup_callback()

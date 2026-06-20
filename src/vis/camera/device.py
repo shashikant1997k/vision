@@ -50,6 +50,10 @@ class CameraDevice(ABC):
     def grab(self) -> Frame | None:
         """Return the next frame, or None when the source is exhausted."""
 
+    def set_exposure_gain(self, exposure_us=None, gain_db=None) -> None:
+        """Live exposure/gain change without restarting the stream. Default no-op;
+        live cameras override it for a real-time settings preview."""
+
     def _on_settings(self, settings: CameraSettings) -> None:
         """Push settings to the hardware. Default: no-op (override per device)."""
 

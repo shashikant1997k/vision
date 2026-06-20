@@ -123,12 +123,12 @@ def main() -> int:
     import os
     from pathlib import Path
 
-    # Persist to a fixed location so saved recipes survive across runs regardless
-    # of the working directory (a relative sqlite file would not).
-    if not os.environ.get("DATABASE_URL"):
-        data_dir = Path.home() / ".vision-inspection"
-        data_dir.mkdir(exist_ok=True)
-        os.environ["DATABASE_URL"] = f"sqlite:///{data_dir / 'vis.db'}"
+    # Single site config file (DB, camera, station, paths, line params). Env
+    # vars still win; the file is the persistent per-install setup.
+    from ..config import AppConfig
+
+    config = AppConfig.load()
+    config.apply_environment()  # DATABASE_URL + camera env from the config file
 
     from PySide6.QtWidgets import QApplication, QDialog
 
@@ -181,7 +181,7 @@ def main() -> int:
             return 0
 
     camera_factory, simulation = _make_camera_factory()
-    camera_ids, camera_recipe_ids = _select_station(sf)
+    camera_ids, camera_recipe_ids = _select_station(sf, config.station())
 
     window = MainWindow(
         username=login.username,
@@ -192,15 +192,19 @@ def main() -> int:
         session_factory=sf,
         user_id=login.user_id,
         simulation=simulation,
+        report_dir=config.report_dir(),
+        alarm_consecutive_rejects=config.alarm_consecutive_rejects(),
+        require_challenge_hours=config.require_challenge_hours(),
     )
     window.resize(1100, 580)
     window.show()
     return app.exec()
 
 
-def _select_station(session_factory):
-    """If stations are configured, let the operator pick one and return its
-    (camera_ids, {camera_id: recipe_id}); otherwise a single default camera."""
+def _select_station(session_factory, station_name=""):
+    """Resolve the station's (camera_ids, {camera_id: recipe_id}). A station name
+    from the config file is used directly; otherwise a lone station is auto-used
+    and multiple stations prompt. No stations → a single default camera."""
     from PySide6.QtWidgets import QInputDialog
 
     from ..db.stations import StationRepository
@@ -209,7 +213,10 @@ def _select_station(session_factory):
     stations = repo.list_stations()
     if not stations:
         return None, None
-    if len(stations) == 1:
+    by_name = {name: sid for sid, name, _line in stations}
+    if station_name and station_name in by_name:
+        sid = by_name[station_name]  # configured station wins
+    elif len(stations) == 1:
         sid = stations[0][0]  # one station → just use it, no prompt
     else:
         labels = [f"{name}{(' / ' + line) if line else ''}" for _sid, name, line in stations]

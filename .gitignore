@@ -28,3 +28,7 @@ oq-evidence.xml
 .vscode/
 models/ppocrv4/*.onnx
 *.onnx
+
+# HMI runtime logs
+hmi_out.log
+hmi_err.log

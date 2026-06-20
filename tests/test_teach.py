@@ -104,6 +104,16 @@ def _qapp():
     return QApplication.instance() or QApplication([])
 
 
+def _flush_test(win):
+    """Wait for the Teach window's background Test worker and deliver its result
+    signal (Test / Test all now run off the GUI thread)."""
+    from PySide6.QtWidgets import QApplication
+
+    if getattr(win, "_worker", None) is not None:
+        win._worker.wait(10000)
+    QApplication.processEvents()
+
+
 def _qa_setup(tmp_path):
     from vis.db.base import init_db, make_engine, make_session_factory
     from vis.db.users import UserService
@@ -203,6 +213,7 @@ def test_teach_image_bank_and_test_all(tmp_path):
     win._arm_tool("code_verify")
     win._on_roi_drawn(30, 30, 300, 300)
     win._test_all()
+    _flush_test(win)
     assert "captured image" in win._status.text()
 
 
@@ -451,6 +462,7 @@ def test_teach_draw_test_save_approve(tmp_path):
     assert win._model.regions[0].tools[0].config.get("expected_data") == _gs1("SN0001")
 
     win._test()
+    _flush_test(win)
     assert "passed" in win._status.text()
     win._save()
     assert win._saved_recipe_id is not None and win._approve_btn.isEnabled()

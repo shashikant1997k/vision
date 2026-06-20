@@ -97,6 +97,38 @@ def test_in_place_panel_navigation(tmp_path):
     assert not win._sidebar_widget.isHidden()
 
 
+def test_product_batch_run_records_to_batch(tmp_path):
+    """Full flow: approve a job, create a batch order, select it on the line, run
+    — results are recorded against that batch."""
+    _qapp()
+    sf, users = _setup(tmp_path)
+    admin = users.create_user("boss", "Secret123", roles=("admin",))
+    from vis.db.batches import BatchService
+    from vis.db.store import RecipeRepository
+
+    repo = RecipeRepository(sf)
+    rid = repo.save_draft(build_code_demo_recipe(), user_id=admin)  # auto-creates product
+    repo.approve(rid, admin, "Secret123", "Released")
+    bid = BatchService(sf).start(rid, "B-001", admin)
+
+    from vis.hmi.main_window import MainWindow
+
+    win = MainWindow(username="boss", recipe=build_code_demo_recipe(),
+                     camera_factory=_factory(defect_rate=0.0, frames=4),
+                     session_factory=sf, user_id=admin)
+    win._reload_open_batches()
+    idx = win._batch_combo.findData(bid)
+    assert idx > 0  # the open batch appears in the run selector
+    win._batch_combo.setCurrentIndex(idx)
+    win.start()
+    assert win._batch_id == bid  # run is bound to the selected batch
+    if win._runner is not None:
+        win._runner.join()
+    win._refresh()
+    recorded = next(b for b in BatchService(sf).list_batches() if b["id"] == bid)
+    assert recorded["total"] > 0  # results saved against the batch
+
+
 def test_consecutive_reject_alarm_stops_the_line(tmp_path):
     _qapp()
     sf, users = _setup(tmp_path)
@@ -106,8 +138,8 @@ def test_consecutive_reject_alarm_stops_the_line(tmp_path):
     win = MainWindow(username="op", recipe=build_code_demo_recipe(),
                      camera_factory=_factory(defect_rate=1.0, frames=8),
                      session_factory=sf, user_id=op, alarm_consecutive_rejects=3)
-    win._batch_id = 1  # the line-stop alarm only guards a running production batch
     win.start()
+    win._batch_id = 1  # the line-stop alarm only guards a running production batch
     if win._runner is not None:
         win._runner.join()
     win._refresh()

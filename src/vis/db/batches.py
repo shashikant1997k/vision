@@ -46,6 +46,23 @@ class BatchService:
                 })
             return out
 
+    def get_batch(self, batch_id: int) -> dict | None:
+        with self._sf() as s:
+            b = s.get(Batch, batch_id)
+            if b is None:
+                return None
+            product = s.get(Product, b.product_id) if b.product_id else None
+            return {
+                "id": b.id, "batch_no": b.batch_no, "status": b.status,
+                "recipe_id": b.recipe_id, "recipe_version": b.recipe_version,
+                "product": product.name if product else "",
+                "variable_data": dict(b.variable_data or {}),
+                "mfg_date": b.mfg_date, "exp_date": b.exp_date, "mrp": b.mrp,
+            }
+
+    def list_open(self) -> list[dict]:
+        return [b for b in self.list_batches() if b["status"] == "open"]
+
     def start(
         self,
         recipe_id: int,

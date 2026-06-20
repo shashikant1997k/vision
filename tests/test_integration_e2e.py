@@ -104,6 +104,7 @@ def test_live_run_streams_results_and_drives_signals(tmp_path):
     assert json.loads(reader.readline())["type"] == "hello"
 
     win.start()
+    win._batch_id = 1  # production batch so the GMP line-stop alarm engages
     if win._runner is not None:
         win._runner.join()
     win._refresh()  # triggers the consecutive-reject ALARM

@@ -48,14 +48,18 @@ def test_live_window_runs_selected_recipe_as_a_batch(tmp_path):
         session_factory=sf,
         user_id=qa_id,
     )
-    # the approved recipe appears in the selector (index 0 is the built-in demo)
-    assert win._recipe_combo.count() == 2
-    win._recipe_combo.setCurrentIndex(1)
-    win._batch_no.setText("B-LIVE-01")
+    # create a batch order, then select it on the line (strict batch-driven flow)
+    from vis.db.batches import BatchService
+
+    bid = BatchService(sf).start(rid, "B-LIVE-01", qa_id)
+    win._reload_open_batches()
+    idx = win._batch_combo.findData(bid)
+    assert idx > 0
+    win._batch_combo.setCurrentIndex(idx)
 
     win.start()
     batch_id = win._batch_id
-    assert batch_id is not None
+    assert batch_id == bid
     if win._runner is not None:
         win._runner.join()
     win._refresh()

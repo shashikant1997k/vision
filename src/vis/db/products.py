@@ -45,3 +45,42 @@ class ProductRepository:
             )
             s.commit()
             return product.id
+
+    def update_product(self, by_user: int, product_id: int, name: str) -> None:
+        with self._sf() as s:
+            require(s, by_user, Perm.RECIPE_CREATE)
+            product = s.get(Product, product_id)
+            if product is None:
+                raise ValueError(f"product {product_id} not found")
+            before = {"name": product.name}
+            product.name = name
+            AuditService(s).record(
+                "product.update", "product", product_id, user_id=by_user,
+                before=before, after={"name": name},
+            )
+            s.commit()
+
+    def get_product(self, product_id: int) -> dict | None:
+        with self._sf() as s:
+            p = s.get(Product, product_id)
+            return {"id": p.id, "code": p.code, "name": p.name} if p else None
+
+    def latest_approved_recipe(self, product_id: int) -> int | None:
+        """The recipe id of the product's current (highest-version) approved job."""
+        with self._sf() as s:
+            rec = s.execute(
+                select(Recipe).where(
+                    Recipe.product_id == product_id, Recipe.status == "approved"
+                ).order_by(Recipe.version.desc())
+            ).scalars().first()
+            return rec.id if rec else None
+
+    def latest_recipe(self, product_id: int) -> int | None:
+        """The latest recipe of any status — to continue editing a draft/job."""
+        with self._sf() as s:
+            rec = s.execute(
+                select(Recipe).where(Recipe.product_id == product_id).order_by(
+                    Recipe.version.desc()
+                )
+            ).scalars().first()
+            return rec.id if rec else None

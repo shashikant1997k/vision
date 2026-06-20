@@ -110,6 +110,11 @@ class TeachWindow(QMainWindow):
         self._model = TeachModel.from_recipe(recipe) if recipe is not None \
             else TeachModel(product, recipe_id)
         self._editing = recipe is not None
+        # When teaching a job for an existing product (or editing one), the
+        # product code is fixed — a recipe-name edit must not re-point it.
+        self._fixed_code = self._model.recipe_id if (
+            recipe is not None or (recipe_id and recipe_id != "recipe")
+        ) else None
         self._saved_recipe_id: int | None = None
         self._lanes = reject_lanes or ["lane1", "lane2"]
         self._selected = None  # ("region", r) | ("tool", r, t) | None
@@ -915,7 +920,9 @@ class TeachWindow(QMainWindow):
     def _name_edited(self) -> None:
         name = self._recipe_name.text().strip() or "New Recipe"
         self._model.product = name
-        self._model.recipe_id = name
+        # a new ad-hoc recipe derives its code from the name; a product-bound
+        # job keeps the product's fixed code so it stays linked to that product
+        self._model.recipe_id = self._fixed_code if self._fixed_code else name
 
     def _product_edited(self) -> None:
         if self._loading or self._selected is None or self._selected[0] != "region":

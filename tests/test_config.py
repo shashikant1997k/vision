@@ -1,7 +1,19 @@
 import json
 import os
 
+import pytest
+
 from vis.config import AppConfig, config_path
+
+
+@pytest.fixture(autouse=True)
+def _restore_env():
+    # apply_environment() writes os.environ directly (not via monkeypatch); snapshot
+    # and restore so these tests can't leak camera/DB env into other test files.
+    saved = dict(os.environ)
+    yield
+    os.environ.clear()
+    os.environ.update(saved)
 
 
 def _home(tmp_path, monkeypatch):

@@ -89,6 +89,14 @@ class MainWindow(QMainWindow):
         self._stats = LiveStats()
         self._live = LiveView()
 
+        # primary run selector: open batch orders (strict flow)
+        self._batch_combo = QComboBox()
+        self._batch_combo.setToolTip("Pick an open batch order to run, or test/setup mode.")
+        self._batch_combo.currentIndexChanged.connect(self._on_batch_selected)
+        self._batch_refresh = QPushButton("↻")
+        self._batch_refresh.setFixedWidth(38)
+        self._batch_refresh.setToolTip("Reload open batch orders")
+        self._batch_refresh.clicked.connect(self._reload_open_batches)
         # recipe selector: built-in demo + any approved recipes from the DB
         self._recipe_combo = QComboBox()
         self._reload_btn = QPushButton("↻")
@@ -183,6 +191,8 @@ class MainWindow(QMainWindow):
         self._stations = QPushButton("Stations…")
         self._admin = QPushButton("Admin…")
         self._settings = QPushButton("Camera setup…")
+        self._products_btn = QPushButton("Products…")
+        self._batches_btn = QPushButton("Batches…")
         self._stop.setEnabled(False)
         self._start.clicked.connect(self.start)
         self._stop.clicked.connect(self.stop)
@@ -198,6 +208,8 @@ class MainWindow(QMainWindow):
         self._stations.clicked.connect(self.open_stations)
         self._admin.clicked.connect(self.open_admin)
         self._settings.clicked.connect(self.open_settings)
+        self._products_btn.clicked.connect(self.open_products)
+        self._batches_btn.clicked.connect(self.open_batches)
 
         # role-gate the engineering/admin controls: operators get a clean
         # run-only screen (industry practice — not just backend permission errors)
@@ -205,6 +217,8 @@ class MainWindow(QMainWindow):
 
         for widget, perm in (
             (self._teach, Perm.RECIPE_CREATE),
+            (self._products_btn, Perm.RECIPE_CREATE),
+            (self._batches_btn, Perm.BATCH_MANAGE),
             (self._edit_recipe_btn, Perm.RECIPE_CREATE),
             (self._teach_files, Perm.RECIPE_CREATE),
             (self._emulate, Perm.RECIPE_CREATE),
@@ -230,28 +244,38 @@ class MainWindow(QMainWindow):
             totals_row.addSpacing(10)
         totals_row.addStretch(1)
 
-        # --- recipe selector: a single "Recipe" for one camera; per-camera
-        # selectors appear only in multi-camera setups ---
+        # --- run selector: an open BATCH order (primary), or test/setup mode ---
+        batch_row = QHBoxLayout()
+        batch_row.addWidget(self._batch_combo, 1)
+        batch_row.addWidget(self._batch_refresh)
+        job_form = QFormLayout()
+        job_form.addRow("Run batch", batch_row)
+
+        # test/setup box: pick a recipe directly (no recording) — shown only in
+        # test mode. Per-camera recipe selectors appear here for multi-camera.
         recipe_row = QHBoxLayout()
+        recipe_row.setContentsMargins(0, 0, 0, 0)
         recipe_row.addWidget(self._recipe_combo, 1)
         recipe_row.addWidget(self._edit_recipe_btn)
         recipe_row.addWidget(self._reload_btn)
-        job_form = QFormLayout()
         self._cam_recipe_combos = {self._camera_ids[0]: self._recipe_combo}
-        multi = len(self._camera_ids) > 1
-        job_form.addRow("Recipe " + (self._camera_ids[0] if multi else ""), recipe_row)
+        test_form = QFormLayout()
+        test_form.setContentsMargins(0, 0, 0, 0)
+        test_form.addRow("Test recipe", recipe_row)
         for cid in self._camera_ids[1:]:
             combo = QComboBox()
             self._cam_recipe_combos[cid] = combo
-            job_form.addRow(f"Recipe {cid}", combo)
-        self._reload_recipes()  # populate the per-camera combos now they exist
+            test_form.addRow(f"Recipe {cid}", combo)
+        self._reload_recipes()
         for cid, rid in (camera_recipe_ids or {}).items():  # pre-select from station config
             combo = self._cam_recipe_combos.get(cid)
             if combo is not None:
                 idx = combo.findData(rid)
                 if idx >= 0:
                     combo.setCurrentIndex(idx)
-        job_form.addRow("Batch", self._batch_no)
+        self._test_box = QWidget()
+        self._test_box.setLayout(test_form)
+        self._reload_open_batches()
 
         # --- action buttons grouped by workflow stage (Setup → Teach → Run) so
         # the next step is obvious and buttons never get crushed. A section
@@ -267,7 +291,7 @@ class MainWindow(QMainWindow):
             head.setVisible(any(not w.isHidden() for w in members))
             return head
 
-        build_btns = (self._settings, self._teach, self._teach_files,
+        build_btns = (self._products_btn, self._settings, self._teach, self._teach_files,
                       self._fonts, self._import, self._emulate)
         system_btns = (self._comms, self._stations, self._admin)
 
@@ -285,7 +309,7 @@ class MainWindow(QMainWindow):
         sidebar.addWidget(_section_label("RUN"))
         sidebar.addWidget(self._start)
         sidebar.addWidget(self._stop)
-        for w in (self._challenge, self._review, self._events_btn):
+        for w in (self._batches_btn, self._challenge, self._review, self._events_btn):
             sidebar.addWidget(w)
         sidebar.addWidget(_section("BUILD RECIPE", build_btns))
         for w in build_btns:
@@ -302,8 +326,9 @@ class MainWindow(QMainWindow):
         # --- right info panel: recipe + live results + totals ---
         info = QVBoxLayout()
         info.setSpacing(8)
-        info.addWidget(_section_label("RECIPE"))
+        info.addWidget(_section_label("RUN"))
         info.addLayout(job_form)
+        info.addWidget(self._test_box)
         info.addWidget(self._state)
         info.addWidget(_section_label("RESULTS"))
         info.addWidget(self._results_table, 1)
@@ -432,6 +457,29 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
 
+    def _reload_open_batches(self) -> None:
+        """Populate the run selector with open batch orders (+ test/setup mode)."""
+        if not hasattr(self, "_batch_combo"):
+            return
+        current = self._batch_combo.currentData()
+        self._batch_combo.blockSignals(True)
+        self._batch_combo.clear()
+        self._batch_combo.addItem("— Test / setup (no recording) —", None)
+        if self._sf is not None:
+            from ..db.batches import BatchService
+
+            for b in BatchService(self._sf).list_open():
+                self._batch_combo.addItem(f"{b['batch_no']}  ·  {b['product']}", b["id"])
+        idx = self._batch_combo.findData(current)
+        self._batch_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        self._batch_combo.blockSignals(False)
+        self._on_batch_selected()
+
+    def _on_batch_selected(self) -> None:
+        """Show the test-recipe box only in test/setup mode (no batch selected)."""
+        if hasattr(self, "_test_box"):
+            self._test_box.setVisible(self._batch_combo.currentData() is None)
+
     def _reload_recipes(self) -> None:
         """Repopulate every camera's recipe selector from the DB (demo + approved)."""
         combos = list(getattr(self, "_cam_recipe_combos", {}).values()) or [self._recipe_combo]
@@ -457,6 +505,7 @@ class MainWindow(QMainWindow):
 
         if event.type() == QEvent.ActivationChange and self.isActiveWindow():
             self._reload_recipes()  # refresh after returning from the teach window
+            self._reload_open_batches()  # pick up newly created batch orders
         super().changeEvent(event)
 
     def _resolve_recipe_for(self, combo):
@@ -475,51 +524,49 @@ class MainWindow(QMainWindow):
     def start(self) -> None:
         if self._runner is not None:
             return
-        self._recipe, recipe_db_id = self._resolve_recipe()
-        # challenge-test line-start gate: if enabled, a passing challenge test for
-        # this recipe must exist within the window, else block start (GMP control)
-        if not self._challenge_gate_ok(recipe_db_id):
-            return
-        # the line is resuming — classify any open downtime (OEE)
-        self._classify_downtime()
+        from ..runtime.resolve import resolve_batch_fields
+
         bus = EventBus()
-        batch_no = self._batch_no.text().strip()
+        selected_batch = self._batch_combo.currentData()  # None = test/setup mode
+        batch_no = ""
         variable_data: dict = {}
 
-        if self._sf is not None and recipe_db_id is not None:
-            from ..runtime.resolve import required_batch_fields, resolve_batch_fields
+        if selected_batch is not None:
+            # --- strict production run from a pre-created open batch order ------
+            from ..db.batches import BatchService
+            from ..db.serials import SerialRegistry
+            from ..db.store import RecipeRepository, ResultStore
 
-            fields = required_batch_fields(self._recipe)
-            if fields:
-                # the recipe is fed values before every batch — collect them now
-                from .batch_data_dialog import BatchDataDialog
-
-                dialog = BatchDataDialog(batch_no, fields, self)
-                if dialog.exec() != QDialog.Accepted:
-                    return
-                batch_no = dialog.batch_no()
-                variable_data = dialog.values()
+            info = BatchService(self._sf).get_batch(int(selected_batch))
+            if info is None or info["status"] != "open":
+                self.statusBar().showMessage("That batch is no longer open — reloading.")
+                self._reload_open_batches()
+                return
+            self._recipe = RecipeRepository(self._sf).load(info["recipe_id"])
+            recipe_db_id = info["recipe_id"]
+            variable_data = info["variable_data"]
+            if variable_data:  # bake the batch's lot/MFG/EXP/MRP into the recipe
                 self._recipe = resolve_batch_fields(self._recipe, variable_data)
-
-            if batch_no:
-                from ..db.batches import BatchService
-                from ..db.store import ResultStore
-
-                try:
-                    self._batch_id = BatchService(self._sf).start(
-                        recipe_db_id, batch_no, self._user_id, variable_data=variable_data
-                    )
-                except Exception as exc:
-                    self.statusBar().showMessage(f"Batch start failed: {exc}")
-                    return
-                bus.subscribe("inspection.result", ResultStore(self._sf, batch_id=self._batch_id).on_result)
-                self._close_batch.setEnabled(True)
-                self._log_event("info", "batch", f"Batch {batch_no} started")
-                # serial uniqueness / duplicate detection for this batch
-                from ..db.serials import SerialRegistry
-
-                self._serials = SerialRegistry(self._sf, self._batch_id)
-                bus.subscribe("inspection.result", self._on_serial)
+            if not self._challenge_gate_ok(recipe_db_id):
+                return
+            self._classify_downtime()
+            self._batch_id = info["id"]
+            batch_no = info["batch_no"]
+            bus.subscribe(
+                "inspection.result",
+                ResultStore(self._sf, batch_id=self._batch_id).on_result,
+            )
+            self._serials = SerialRegistry(self._sf, self._batch_id)
+            bus.subscribe("inspection.result", self._on_serial)
+            self._close_batch.setEnabled(True)
+            self._log_event("info", "batch", f"Batch {batch_no} started")
+        else:
+            # --- test / setup mode — run a recipe directly, nothing recorded ---
+            self._recipe, recipe_db_id = self._resolve_recipe()
+            if not self._challenge_gate_ok(recipe_db_id):
+                return
+            self._classify_downtime()
+            self._batch_id = None
 
         # build one assignment per camera, each with its own selected recipe
         # (the primary recipe drives the batch; batch values apply to all cameras)
@@ -962,6 +1009,28 @@ class MainWindow(QMainWindow):
             self._sf, self._user_id, report_dir=self._report_dir, parent=self,
         ))
 
+    def open_products(self) -> None:
+        """Manage products and each product's inspection job."""
+        if self._sf is None:
+            self.statusBar().showMessage("No database — products unavailable.")
+            return
+        from .products_window import ProductsWindow
+
+        self._show_panel(lambda: ProductsWindow(
+            self._sf, self._user_id, self.open_teach_for_product, parent=self,
+        ))
+
+    def open_batches(self) -> None:
+        """Create and manage batch orders (select a product to run)."""
+        if self._sf is None:
+            self.statusBar().showMessage("No database — batches unavailable.")
+            return
+        from .batches_window import BatchOrdersWindow
+
+        self._show_panel(lambda: BatchOrdersWindow(
+            self._sf, self._user_id, on_changed=self._reload_open_batches, parent=self,
+        ))
+
     def open_review(self) -> None:
         """Open the reject-review filmstrip over the captured failed images."""
         if len(self._failed_log) == 0:
@@ -995,10 +1064,24 @@ class MainWindow(QMainWindow):
             return
         self._open_live_teach(recipe=recipe)
 
-    def _open_live_teach(self, recipe=None) -> None:
+    def open_teach_for_product(self, code, name, recipe_id=None) -> None:
+        """Teach (or edit) the inspection job for a specific product."""
+        recipe = None
+        if recipe_id is not None and self._sf is not None:
+            from ..db.store import RecipeRepository
+
+            try:
+                recipe = RecipeRepository(self._sf).load(int(recipe_id))
+            except Exception as exc:
+                self.statusBar().showMessage(f"Could not load job: {exc}")
+                return
+        self._open_live_teach(recipe=recipe, product_code=code, product_name=name)
+
+    def _open_live_teach(self, recipe=None, product_code=None, product_name=None) -> None:
         """Open the live Teach screen on the camera: position the product, Snap to
         freeze a reference, then mark up ROIs (industry-standard live teach). When
-        `recipe` is given, its products/inspections are loaded for editing."""
+        `recipe` is given, its products/inspections are loaded for editing; when
+        `product_code` is given a new job is bound to that product."""
         try:
             source = self._camera_factory(self._camera_id, None, self._recipe)
         except Exception as exc:
@@ -1051,10 +1134,11 @@ class MainWindow(QMainWindow):
             if callable(close):
                 close()
 
-        msg = "Live teach — edit recipe" if recipe is not None else "Live teach — new recipe"
+        msg = "Live teach — edit job" if recipe is not None else "Live teach — new job"
         self.statusBar().showMessage(f"{msg}: position the product, then Snap.")
         self._open_teach_with_images(
-            [seed], image_provider=provider, on_close=on_close, recipe=recipe
+            [seed], image_provider=provider, on_close=on_close, recipe=recipe,
+            product_code=product_code, product_name=product_name,
         )
 
     def open_teach_from_files(self) -> None:
@@ -1118,10 +1202,13 @@ class MainWindow(QMainWindow):
         )
 
     def _open_teach_with_images(self, images, image_provider=None, on_close=None,
-                                recipe=None) -> None:
+                                recipe=None, product_code=None, product_name=None) -> None:
         from .teach_window import TeachWindow
 
         lanes = sorted({region.reject_output for region in self._recipe.regions})
+        bind = {}
+        if recipe is None and product_code:  # new job bound to an existing product
+            bind = {"product": product_name or product_code, "recipe_id": product_code}
         self._show_panel(lambda: TeachWindow(
             user_id=self._user_id,
             reference_image=images[0],
@@ -1132,6 +1219,7 @@ class MainWindow(QMainWindow):
             image_provider=image_provider,
             on_close=on_close,
             parent=self,
+            **bind,
         ))
 
     def _free_run_settings(self):

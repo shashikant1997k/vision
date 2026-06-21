@@ -50,8 +50,7 @@ def test_operator_sees_run_only_screen(tmp_path):
     win = MainWindow(username="op", recipe=build_code_demo_recipe(),
                      camera_factory=_factory(), session_factory=sf, user_id=op)
     # engineering/admin controls are hidden, not just permission-blocked
-    for w in (win._teach, win._teach_files, win._emulate, win._import, win._stations,
-              win._settings, win._admin):
+    for w in (win._teach, win._teach_files, win._import, win._settings, win._admin):
         assert w.isHidden()
     # run controls remain
     assert not win._start.isHidden() and not win._review.isHidden()
@@ -65,7 +64,7 @@ def test_admin_sees_everything(tmp_path):
 
     win = MainWindow(username="boss", recipe=build_code_demo_recipe(),
                      camera_factory=_factory(), session_factory=sf, user_id=admin)
-    for w in (win._teach, win._settings, win._admin, win._stations):
+    for w in (win._teach, win._settings, win._admin):
         assert not w.isHidden()
 
 

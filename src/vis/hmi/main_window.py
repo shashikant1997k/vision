@@ -182,17 +182,13 @@ class MainWindow(QMainWindow):
         self._stop.setProperty("variant", "danger")
         self._teach = QPushButton("Teach…")
         self._teach_files = QPushButton("Teach on images…")
-        self._emulate = QPushButton("Emulate folder…")
         self._review = QPushButton("Review rejects…")
         self._import = QPushButton("Import recipe…")
         self._fonts = QPushButton("Fonts…")
         self._challenge = QPushButton("Challenge test…")
         self._events_btn = QPushButton("Events…")
-        self._comms = QPushButton("Comms…")
-        self._plc_params = QPushButton("PLC parameters…")
-        self._stations = QPushButton("Stations…")
         self._admin = QPushButton("Admin…")
-        self._settings = QPushButton("Camera setup…")
+        self._settings = QPushButton("Settings…")  # tabbed: Camera · Comms · PLC · Station
         self._products_btn = QPushButton("Products…")
         self._batches_btn = QPushButton("Batches…")
         self._stop.setEnabled(False)
@@ -200,15 +196,11 @@ class MainWindow(QMainWindow):
         self._stop.clicked.connect(self.stop)
         self._teach.clicked.connect(self.open_teach)
         self._teach_files.clicked.connect(self.open_teach_from_files)
-        self._emulate.clicked.connect(self.open_emulate)
         self._review.clicked.connect(self.open_review)
         self._import.clicked.connect(self.import_recipe)
         self._fonts.clicked.connect(self.open_fonts)
         self._challenge.clicked.connect(self.open_challenge)
         self._events_btn.clicked.connect(self.open_events)
-        self._comms.clicked.connect(self.open_comms)
-        self._plc_params.clicked.connect(self.open_plc_params)
-        self._stations.clicked.connect(self.open_stations)
         self._admin.clicked.connect(self.open_admin)
         self._settings.clicked.connect(self.open_settings)
         self._products_btn.clicked.connect(self.open_products)
@@ -224,12 +216,8 @@ class MainWindow(QMainWindow):
             (self._batches_btn, Perm.BATCH_MANAGE),
             (self._edit_recipe_btn, Perm.RECIPE_CREATE),
             (self._teach_files, Perm.RECIPE_CREATE),
-            (self._emulate, Perm.RECIPE_CREATE),
             (self._import, Perm.RECIPE_CREATE),
             (self._fonts, Perm.RECIPE_CREATE),
-            (self._comms, Perm.STATION_MANAGE),
-            (self._plc_params, Perm.STATION_MANAGE),
-            (self._stations, Perm.STATION_MANAGE),
             (self._settings, Perm.STATION_MANAGE),
         ):
             widget.setVisible(self._can(perm))
@@ -296,9 +284,9 @@ class MainWindow(QMainWindow):
             head.setVisible(any(not w.isHidden() for w in members))
             return head
 
-        build_btns = (self._products_btn, self._settings, self._teach, self._teach_files,
-                      self._fonts, self._import, self._emulate)
-        system_btns = (self._comms, self._plc_params, self._stations, self._admin)
+        build_btns = (self._products_btn, self._teach, self._teach_files,
+                      self._fonts, self._import)
+        system_btns = (self._settings, self._admin)
 
         # === modern shell: header · [sidebar | feed | info] · footer ===========
         # --- left sidebar: vertical nav, full-width buttons, grouped ---
@@ -1419,7 +1407,29 @@ class MainWindow(QMainWindow):
         self._cam_status.setStyleSheet(f"color:{color}; font-weight:bold")
 
     def open_settings(self) -> None:
-        """Open the camera-settings screen with a live preview from the source."""
+        """Open the tabbed Settings screen: Camera · Comms · PLC · Station."""
+        from .settings_hub import SettingsHubWindow
+
+        def build():
+            tabs = [("Camera", self._build_camera_settings_window())]
+            if self._sf is not None:
+                from .comms_window import CommsWindow
+                from .plc_params_window import PlcParametersWindow
+                from .station_window import StationConfigWindow
+
+                tabs.append(("Comms", CommsWindow(
+                    self._sf, apply_callback=self._apply_comms,
+                    status_provider=self.comms_status, parent=self)))
+                tabs.append(("PLC", PlcParametersWindow(
+                    self._sf, client_factory=self._plc_register_client, parent=self)))
+                tabs.append(("Station", StationConfigWindow(self._sf, self._user_id, self)))
+            return SettingsHubWindow(tabs, parent=self)
+
+        self._show_panel(build)
+
+    def _build_camera_settings_window(self):
+        """Build the camera-settings screen (live preview). Returns the window, or
+        None if the camera can't be opened (the hub then skips the Camera tab)."""
         from .settings_window import CameraSettingsWindow
 
         try:
@@ -1429,7 +1439,7 @@ class MainWindow(QMainWindow):
                 f"Cannot open camera for Settings: {exc} — stop inspection "
                 "and close other camera windows first."
             )
-            return
+            return None
         state = {"gen": None}
 
         def provider():
@@ -1482,14 +1492,14 @@ class MainWindow(QMainWindow):
             if callable(fn):
                 fn(exposure_us=exposure_us, gain_db=gain_db)
 
-        self._show_panel(lambda: CameraSettingsWindow(
+        return CameraSettingsWindow(
             image_provider=provider,
             settings=load_settings(self._camera_id),
             apply_callback=apply_and_persist,
             cleanup_callback=cleanup,
             live_callback=live_apply,
             parent=self,
-        ))
+        )
 
     def _update_results_table(self, snap: dict) -> None:
         """One row per camera/lane: counts plus a live ✓/✗ for the most recent

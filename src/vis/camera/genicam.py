@@ -96,15 +96,28 @@ class HarvesterCamera(CameraDevice):
         self._count = 0
 
     def _close_device(self) -> None:
+        # Each step is independently guarded so a teardown quirk in one never
+        # skips the next: some GenTL producers (Baumer) raise a BusyException
+        # while revoking buffers if acquisition is still active. If destroy()
+        # then threw, harvester.reset() would never run and the camera would be
+        # left owned/wedged (needing a power-cycle). Stop only when acquiring,
+        # and always fall through to reset().
         if self._acquirer is not None:
             try:
-                self._acquirer.stop()
+                if getattr(self._acquirer, "is_acquiring", lambda: False)():
+                    self._acquirer.stop()
             except Exception:
                 pass
-            self._acquirer.destroy()
+            try:
+                self._acquirer.destroy()
+            except Exception:
+                pass
             self._acquirer = None
         if self._harvester is not None:
-            self._harvester.reset()
+            try:
+                self._harvester.reset()
+            except Exception:
+                pass
             self._harvester = None
 
     def _on_settings(self, s: CameraSettings) -> None:

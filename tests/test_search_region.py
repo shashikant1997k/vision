@@ -45,6 +45,19 @@ def test_locator_clamps_to_taught_line_on_busy_background():
     assert band.shape[0] <= 30 + 20
 
 
+def test_locator_reads_taught_line_not_dense_neighbour():
+    """A faint taught line (B.No on a mesh) above a dark dense line (MFG/EXP):
+    the faint line may not register as a band, so the locator must read the
+    taught box, not snap down to the dense neighbour."""
+    canvas = np.full((160, 320, 3), 235, np.uint8)
+    canvas[40:64, 40:240] = 205   # faint top line (taught) — barely above background
+    canvas[90:114, 40:240] = 15   # dark dense bottom line (a different line)
+    taught = (40, 40, 200, 24)
+    band = locate_text_band(canvas, prefer=taught)
+    assert band.shape[0] <= 24 + 14          # the taught line region only
+    assert not (band < 30).any()             # did NOT snap to the dark dense neighbour
+
+
 def _recipe(margin):
     config = {"expected": "LOT42", "uppercase": True}
     if margin:

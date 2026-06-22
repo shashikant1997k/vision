@@ -66,7 +66,6 @@ def locate_text_band(image, pad: int = 6, prefer=None) -> np.ndarray:
     if prefer is not None:
         py = int(prefer[1])
         py1 = py + max(1, int(prefer[3]))
-        anchor_centre = (py + py1) / 2
 
         def overlap(band):
             return max(0, min(band[1], py1) - max(band[0], py))
@@ -74,8 +73,13 @@ def locate_text_band(image, pad: int = 6, prefer=None) -> np.ndarray:
         best = max(bands, key=overlap)
         if overlap(best) > 0:
             y0, y1 = best
-        else:  # nothing overlaps the taught spot — nearest band to it
-            y0, y1 = min(bands, key=lambda b: abs((b[0] + b[1]) / 2 - anchor_centre))
+        else:
+            # Nothing overlaps the taught box: the taught line is too faint to
+            # register as a band (e.g. B.No on a security mesh) while a
+            # neighbouring line is dark and dense (MFG/EXP). Read exactly what the
+            # operator boxed rather than snapping to a different, higher-contrast
+            # line nearby — respect the drawn position over a misleading band.
+            return _inner_crop()
     else:
         centre = arr.shape[0] / 2
         y0, y1 = min(bands, key=lambda b: abs((b[0] + b[1]) / 2 - centre))

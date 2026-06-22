@@ -217,12 +217,16 @@ def _place_tag(draw, box, text, color, font, occupied, W, H):
     _label(draw, (min(x1 + 5, W - tw), y0), text, color, font)
 
 
-def draw_overlay(image: np.ndarray, recipe, results) -> np.ndarray:
+def draw_overlay(image: np.ndarray, recipe, results, offset=(0, 0)) -> np.ndarray:
     """Return a copy of `image` annotated with results: a big PASS/FAIL banner,
     thin green(pass)/red(reject) ROI boxes, and each inspection's read value as a
-    non-overlapping colour-coded tag beside its box."""
+    non-overlapping colour-coded tag beside its box.
+
+    `offset` (ox, oy) is subtracted from every recipe coordinate so the overlay
+    lines up when `image` is a crop of the full frame (zoom-to-content view)."""
     from PIL import Image, ImageDraw
 
+    ox, oy = offset
     arr = np.ascontiguousarray(image)
     img = Image.fromarray(arr).convert("RGB")
     draw = ImageDraw.Draw(img)
@@ -237,7 +241,7 @@ def draw_overlay(image: np.ndarray, recipe, results) -> np.ndarray:
         region_result = by_region.get(region.region_id)
         passed = region_result.passed if region_result else True
         color = GREEN if passed else RED
-        rx, ry, rw, rh = region.roi.x, region.roi.y, region.roi.w, region.roi.h
+        rx, ry, rw, rh = region.roi.x - ox, region.roi.y - oy, region.roi.w, region.roi.h
         _visible_rect(draw, arr, (rx, ry, rx + rw - 1, ry + rh - 1), color, width=2)  # thin
 
         tool_results = {t.tool_id: t for t in (region_result.tool_results if region_result else [])}

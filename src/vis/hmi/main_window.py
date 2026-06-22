@@ -296,9 +296,17 @@ class MainWindow(QMainWindow):
         self._home_btn.setMinimumHeight(34)
         self._home_btn.setToolTip("Back to the live inspection view")
         self._home_btn.clicked.connect(self._navigate_home)
+        self._zoom_content = QPushButton("⛶ Zoom to content")
+        self._zoom_content.setCheckable(True)
+        self._zoom_content.setToolTip(
+            "Show only the inspected area, enlarged — drops the wasted margins so "
+            "the print is bigger and clearer on screen."
+        )
+        self._zoom_content.toggled.connect(self._refresh)
         sidebar = QVBoxLayout()
         sidebar.setSpacing(5)
         sidebar.addWidget(self._home_btn)
+        sidebar.addWidget(self._zoom_content)
         sidebar.addWidget(_section_label("RUN"))
         sidebar.addWidget(self._start)
         sidebar.addWidget(self._stop)
@@ -1515,6 +1523,7 @@ class MainWindow(QMainWindow):
             apply_callback=apply_and_persist,
             cleanup_callback=cleanup,
             live_callback=live_apply,
+            content_bbox=self._content_bbox(self._recipe, (100000, 100000)),
             parent=self,
         )
 
@@ -1546,6 +1555,22 @@ class MainWindow(QMainWindow):
                 live.setForeground(QColor(0, 160, 0) if last else QColor(210, 0, 0))
             self._results_table.setItem(r, 5, live)
 
+    @staticmethod
+    def _content_bbox(recipe, shape, margin: int = 24):
+        """Union of the recipe's region boxes (+ margin), clamped to the frame —
+        the inspected content area for the zoom-to-content view. None if empty."""
+        h, w = shape[:2]
+        xs0 = [r.roi.x for r in recipe.regions]
+        if not xs0:
+            return None
+        x0 = max(0, min(r.roi.x for r in recipe.regions) - margin)
+        y0 = max(0, min(r.roi.y for r in recipe.regions) - margin)
+        x1 = min(w, max(r.roi.x + r.roi.w for r in recipe.regions) + margin)
+        y1 = min(h, max(r.roi.y + r.roi.h for r in recipe.regions) + margin)
+        if x1 - x0 < 16 or y1 - y0 < 16:
+            return None
+        return (x0, y0, x1, y1)
+
     def _refresh(self) -> None:
         snap = self._stats.snapshot()
         for cid, label in self._cam_images.items():
@@ -1553,7 +1578,12 @@ class MainWindow(QMainWindow):
             if latest is not None:
                 frame, results = latest
                 recipe = self._cam_recipes.get(cid, self._recipe)
-                annotated = draw_overlay(frame.image, recipe, results)
+                bb = self._content_bbox(recipe, frame.image.shape) if self._zoom_content.isChecked() else None
+                if bb is not None:
+                    x0, y0, x1, y1 = bb
+                    annotated = draw_overlay(frame.image[y0:y1, x0:x1], recipe, results, offset=(x0, y0))
+                else:
+                    annotated = draw_overlay(frame.image, recipe, results)
                 pixmap = numpy_to_qpixmap(annotated)
                 label.setPixmap(
                     pixmap.scaled(label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)

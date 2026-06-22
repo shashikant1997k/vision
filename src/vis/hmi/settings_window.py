@@ -47,10 +47,12 @@ class CameraSettingsWindow(QMainWindow):
         session_factory=None,
         camera_db_id: int | None = None,
         user_id=None,
+        content_bbox=None,
         parent=None,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Vision Inspection — Camera Settings")
+        self._content_bbox = content_bbox  # (x0,y0,x1,y1) of the inspected area
         self._image_provider = image_provider
         self._apply_callback = apply_callback
         self._cleanup_callback = cleanup_callback
@@ -181,6 +183,12 @@ class CameraSettingsWindow(QMainWindow):
         aoi_form.addRow("Y", self._aoi_y)
         aoi_form.addRow("Width (0 = full)", self._aoi_w)
         aoi_form.addRow("Height (0 = full)", self._aoi_h)
+        if self._content_bbox is not None:
+            fit = QPushButton("Fit to inspected content")
+            fit.setToolTip("Set the sensor window to the recipe's inspected area — drops "
+                           "the wasted margins and raises the frame rate. Apply to take effect.")
+            fit.clicked.connect(self._fit_aoi_to_content)
+            aoi_form.addRow("", fit)
         aoi_box = QGroupBox("Sensor window (AOI)")
         aoi_box.setLayout(aoi_form)
 
@@ -304,6 +312,23 @@ class CameraSettingsWindow(QMainWindow):
         self._timer.timeout.connect(self._poll)
         self._timer.start()
         self._poll()
+
+    def _fit_aoi_to_content(self) -> None:
+        """Set the AOI spin-boxes to the recipe's inspected area, aligned to a
+        16 px grid (GigE sensors require aligned offset/size)."""
+        if not self._content_bbox:
+            return
+        x0, y0, x1, y1 = self._content_bbox
+        a = 16
+        x = max(0, (int(x0) // a) * a)
+        y = max(0, (int(y0) // a) * a)
+        w = max(a, -(-(int(x1) - x) // a) * a)
+        h = max(a, -(-(int(y1) - y) // a) * a)
+        self._aoi_x.setValue(x)
+        self._aoi_y.setValue(y)
+        self._aoi_w.setValue(w)
+        self._aoi_h.setValue(h)
+        self._status.setText("AOI set to the inspected content — click Apply to take effect.")
 
     def settings_from_form(self) -> CameraSettings:
         return CameraSettings(

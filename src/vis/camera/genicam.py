@@ -16,6 +16,21 @@ def _try_set(node_map, name: str, value) -> None:
         pass
 
 
+def _reset_aoi_full(node_map) -> None:
+    """Restore the FULL sensor frame: offset to 0, width/height to their max.
+    A GigE camera keeps a previously-set AOI until told otherwise, so an AOI of
+    0 (full) must explicitly grow width/height back to max — otherwise the sensor
+    stays stuck at the last small window (e.g. 1440x200)."""
+    _try_set(node_map, "OffsetX", 0)
+    _try_set(node_map, "OffsetY", 0)
+    for name in ("Width", "Height"):
+        try:
+            node = getattr(node_map, name)
+            node.value = node.max  # grow back to the sensor maximum
+        except Exception:
+            pass
+
+
 class HarvesterCamera(CameraDevice):
     """Real GigE Vision / GenICam camera via Harvester + a GenTL producer (.cti).
 
@@ -146,10 +161,16 @@ class HarvesterCamera(CameraDevice):
         if s.frame_rate:
             _try_set(node_map, "AcquisitionFrameRate", float(s.frame_rate))
         if s.sensor_roi.w and s.sensor_roi.h:
+            # zero the offset before resizing (a non-zero offset can block a
+            # width/height change), set the window, then position it
+            _try_set(node_map, "OffsetX", 0)
+            _try_set(node_map, "OffsetY", 0)
             _try_set(node_map, "Width", int(s.sensor_roi.w))
             _try_set(node_map, "Height", int(s.sensor_roi.h))
             _try_set(node_map, "OffsetX", int(s.sensor_roi.x))
             _try_set(node_map, "OffsetY", int(s.sensor_roi.y))
+        else:
+            _reset_aoi_full(node_map)  # AOI 0 = full sensor; undo any prior AOI
         # TriggerMode must be set per TriggerSelector; setting it blind can
         # silently no-op and leave a camera stuck waiting for a hardware pulse
         # (the VCXG-24C ships selector=FrameStart, source=Line0). For a hardware

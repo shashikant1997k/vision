@@ -135,6 +135,10 @@ class CommsWindow(QMainWindow):
         out_form.addRow("FAIL token", self._out_nok)
         out_form.addRow("Bad-read token", self._out_badread)
         out_form.addRow("Terminator", self._out_term)
+        self._out_test = QPushButton("Test send to host…")
+        self._out_test.setToolTip("Send one sample line to the host now, to check the connection (e.g. to Hercules).")
+        self._out_test.clicked.connect(self._test_send)
+        out_form.addRow("", self._out_test)
         out_box = QGroupBox("Output template (results → host / PLC / MES)")
         out_box.setLayout(out_form)
 
@@ -191,6 +195,38 @@ class CommsWindow(QMainWindow):
 
         make_scrollable(self)  # never hide controls below the fold
         self._show_status()
+
+    def _test_send(self) -> None:
+        """Send one sample result line to the configured host now, so the operator
+        can confirm Hercules/PLC actually receives it before running a batch."""
+        import socket
+
+        from ..engine.aggregator import RegionResult
+        from ..integrations.format import OutputTemplate, format_template
+        from ..tools.base import ToolResult
+
+        cfg = self.current_config()["output_template"]
+        host = (cfg.get("host") or "").strip()
+        port = int(cfg.get("port", 9420))
+        sample = RegionResult(1, "cam1", "Product 1", "lane1", True,
+                              [ToolResult("code2", True, "SAMPLE12345", "x", 0.99, "font-ocv", {})])
+        msg = format_template(sample, OutputTemplate.from_dict(cfg))
+        if not host:
+            self._status.setText(
+                f"Server mode (no host set): start the line, then point Hercules at "
+                f"THIS PC's IP, port {port}. A result line looks like: {msg.strip()!r}"
+            )
+            return
+        try:
+            s = socket.create_connection((host, port), timeout=3.0)
+            s.sendall(msg.encode("utf-8"))
+            s.close()
+            self._status.setText(f"✓ Sent to {host}:{port} → {msg.strip()!r}")
+        except Exception as exc:
+            self._status.setText(
+                f"✗ Could not reach {host}:{port}: {exc} — is Hercules listening "
+                f"there as a TCP server?"
+            )
 
     def current_config(self) -> dict:
         signals = dict(DEFAULTS["signals"])

@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..common.events import EventBus
-from ..engine.pool import SyncPool
+from ..engine.pool import SyncPool, ThreadPool
 from ..io import RejectController, RejectOutputConfig, SimulatedIO
 from ..runtime import InspectionRunner, LiveStats, LiveView, draw_overlay
 from .image import numpy_to_qpixmap
@@ -626,9 +626,20 @@ class MainWindow(QMainWindow):
             [RejectOutputConfig(lane, channel=i + 1) for i, lane in enumerate(lanes)],
             io=SimulatedIO(),
         )
+        # Run a frame's tools in parallel threads so a QR + several text lines
+        # finish inside the cycle-time budget (threads share the warm OCR model;
+        # ONNX/OpenCV release the GIL, so reads run concurrently). Falls back to
+        # serial SyncPool if a single tool per recipe makes threads pointless.
+        import os
+
+        n_tools = max(
+            (len(r.tools) for rec in self._cam_recipes.values() for r in rec.regions),
+            default=1,
+        )
+        pool = ThreadPool(min(n_tools, (os.cpu_count() or 4))) if n_tools > 1 else SyncPool()
         self._runner = InspectionRunner(
             assignments,
-            SyncPool(),
+            pool,
             bus=bus,
             stats=self._stats,
             live_view=self._live,
@@ -970,6 +981,12 @@ class MainWindow(QMainWindow):
         if self._runner is not None:
             self._runner.stop()
             self._runner.join()
+            pool = getattr(self._runner, "pool", None)
+            if pool is not None:
+                try:
+                    pool.close()  # shut down the worker threads
+                except Exception:
+                    pass
             self._runner = None
         self._timer.stop()
         self._refresh_camera_status()  # camera free again — show full details

@@ -15,6 +15,25 @@ class SyncPool:
         pass
 
 
+class ThreadPool:
+    """Runs a frame's tools on a thread pool, sharing the one in-process OCR
+    model. ONNX Runtime and OpenCV release the GIL during inference/transform, so
+    OCR-bound tools run truly in parallel — without the per-worker model load,
+    process spawn, and IPC pickling of ProcessPool. Right choice for line speed
+    (e.g. a QR + 5 text lines must finish well inside the cycle-time budget)."""
+
+    def __init__(self, workers: int) -> None:
+        from concurrent.futures import ThreadPoolExecutor
+
+        self._ex = ThreadPoolExecutor(max_workers=max(1, workers))
+
+    def map(self, tasks: Iterable[ToolTask]) -> list[ToolOutcome]:
+        return list(self._ex.map(run_tool_task, list(tasks)))
+
+    def close(self) -> None:
+        self._ex.shutdown(wait=False)
+
+
 class ProcessPool:
     """Multiprocessing worker pool with warm processes (see docs/05).
 

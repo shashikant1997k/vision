@@ -20,13 +20,15 @@ from pathlib import Path
 
 DEST = Path.home() / ".vision-inspection" / "models" / "ppocrv4"
 
-# RapidOCR's published PP-OCRv4 *server* ONNX (most accurate; the ch rec_server
-# uses the default ppocr dictionary, so English letters + digits read well).
+# RapidOCR's published PP-OCRv4 *mobile* ONNX — fast enough for a production line
+# (rec ~50 ms/read vs the server model's ~170 ms and a multi-second detector).
+# The ch models use the default ppocr dictionary, so English letters + digits read
+# well. Swap _mobile -> _server below if you need maximum accuracy over speed.
 _MS_API = ("https://www.modelscope.cn/api/v1/models/RapidAI/RapidOCR/repo"
            "?Revision=master&FilePath={path}")
 _MS_RESOLVE = "https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/master/{path}"
-_DET = "onnx/PP-OCRv4/det/ch_PP-OCRv4_det_server.onnx"
-_REC = "onnx/PP-OCRv4/rec/ch_PP-OCRv4_rec_server.onnx"
+_DET = "onnx/PP-OCRv4/det/ch_PP-OCRv4_det_mobile.onnx"
+_REC = "onnx/PP-OCRv4/rec/ch_PP-OCRv4_rec_mobile.onnx"
 SOURCES = {
     "det.onnx": [_MS_API.format(path=_DET), _MS_RESOLVE.format(path=_DET)],
     "rec.onnx": [_MS_API.format(path=_REC), _MS_RESOLVE.format(path=_REC)],

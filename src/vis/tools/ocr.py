@@ -313,12 +313,10 @@ def recognize(roi_image, accept=None) -> tuple[str, float]:
     if score >= 0.85 and len(text.replace(" ", "")) >= 2 and (accept is None or accept(text)):
         return text, score
     best = (text, score)
-    try:  # a detector pass on the primary (multi-line / loose boxes)
-        t2, s2 = _run_det_rec(engine, primary)
-        if _metric(t2, s2) > _metric(*best):
-            best = (t2, s2)
-    except Exception:
-        pass
+    # NB: no detector pass here. A single-line ROI (the locator isolates one line)
+    # reads fine with recognition-only (~50 ms); the text DETECTOR is 10-100x
+    # slower (seconds per call) and would blow the line's cycle-time budget. The
+    # detector path (_run_det_rec) stays available for explicit multi-line use.
 
     if accept is not None:
         # verification: the primary already reads the expected → done

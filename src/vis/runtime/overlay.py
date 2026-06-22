@@ -185,67 +185,87 @@ def _banner(draw, xy, text, bg, font):
     draw.text((x, y), text, fill=(255, 255, 255), font=font)
 
 
+def _rects_overlap(a, b) -> bool:
+    return not (a[2] <= b[0] or b[2] <= a[0] or a[3] <= b[1] or b[3] <= a[1])
+
+
+def _place_tag(draw, box, text, color, font, occupied, W, H):
+    """Draw a per-ROI read tag so tags never overlap each other: prefer just to
+    the RIGHT of the box; if that collides with an already-placed tag, slide it
+    down until it's clear. Coloured text on a solid dark backing = readable on
+    any background (green = pass, red = fail)."""
+    x0, y0, x1, y1 = box
+    left, top, right, bottom = draw.textbbox((0, 0), text, font=font)
+    tw, th = (right - left) + 8, (bottom - top) + 6
+    for cx, cy in ((x1 + 5, y0), (x0, y1 + 3), (max(2, x0 - tw - 5), y0)):
+        cx = max(2, min(cx, W - tw - 2))
+        cy = max(2, min(cy, H - th - 2))
+        rect = [cx, cy, cx + tw, cy + th]
+        for _ in range(60):
+            if not any(_rects_overlap(rect, o) for o in occupied):
+                break
+            cy += th + 2
+            if cy > H - th - 2:
+                break
+            rect = [cx, cy, cx + tw, cy + th]
+        if not any(_rects_overlap(rect, o) for o in occupied):
+            occupied.append(rect)
+            draw.rectangle([rect[0], rect[1], rect[2], rect[3]], fill=(0, 0, 0))
+            draw.text((rect[0] + 4, rect[1] + 3), text, fill=color, font=font)
+            return
+    # everything collided — draw at the right edge anyway (rare)
+    _label(draw, (min(x1 + 5, W - tw), y0), text, color, font)
+
+
 def draw_overlay(image: np.ndarray, recipe, results) -> np.ndarray:
-    """Return a copy of `image` annotated with results: each region boxed and
-    bannered green (PASS) / red (REJECT), each inspection boxed with a ✓/✗ tag
-    showing the value it read."""
+    """Return a copy of `image` annotated with results: a big PASS/FAIL banner,
+    thin green(pass)/red(reject) ROI boxes, and each inspection's read value as a
+    non-overlapping colour-coded tag beside its box."""
     from PIL import Image, ImageDraw
 
     arr = np.ascontiguousarray(image)
     img = Image.fromarray(arr).convert("RGB")
     draw = ImageDraw.Draw(img)
-    height = img.height
-    big = _font(max(18, height // 22))  # region status — readable at a glance
-    font = _font(max(14, height // 32))  # inspection value tags
+    W, H = img.width, img.height
+    big = _font(max(22, H // 18))      # the headline PASS / FAIL
+    font = _font(max(13, H // 40))     # per-ROI read tags (compact)
 
     by_region = {r.region_id: r for r in results}
+    occupied: list = []  # placed tag rects, so read values never overlap
+
     for region in recipe.regions:
         region_result = by_region.get(region.region_id)
         passed = region_result.passed if region_result else True
         color = GREEN if passed else RED
         rx, ry, rw, rh = region.roi.x, region.roi.y, region.roi.w, region.roi.h
-        _visible_rect(draw, arr, (rx, ry, rx + rw - 1, ry + rh - 1), color, width=4)
-
-        status = "PASS"
-        if region_result and not region_result.passed:
-            status = f"REJECT -> {region_result.reject_output or '?'}"
-        # banner INSIDE the region's top edge so it can never clip off-image
-        banner_text = f"{region.name} — {status}"
-        banner_y = max(2, ry + 4)
-        _banner(draw, (rx + 8, banner_y), banner_text, color, big)
-        _, btop, _, bbottom = draw.textbbox((rx + 8, banner_y), banner_text, font=big)
-        banner_bottom = bbottom + 6
+        _visible_rect(draw, arr, (rx, ry, rx + rw - 1, ry + rh - 1), color, width=2)  # thin
 
         tool_results = {t.tool_id: t for t in (region_result.tool_results if region_result else [])}
         for tool in region.tools:
             tr = tool_results.get(tool.tool_id)
             tcolor = GREEN if (tr and tr.passed) else RED
             ax, ay = rx + tool.roi.x, ry + tool.roi.y
+            box = (ax, ay, ax + tool.roi.w - 1, ay + tool.roi.h - 1)
             mx, my = _margins(tool)
             if mx or my:
                 _visible_dashed(
                     draw, arr,
                     (ax - mx, ay - my, ax + tool.roi.w - 1 + mx, ay + tool.roi.h - 1 + my),
-                    tcolor, width=2,
+                    tcolor, width=1,
                 )
-            _visible_rect(draw, arr, (ax, ay, ax + tool.roi.w - 1, ay + tool.roi.h - 1), tcolor, width=3)
+            _visible_rect(draw, arr, box, tcolor, width=2)  # thin so text stays visible
             if tr is None:
                 continue
             value = _disp(tr.measured_value) or "(no read)"
-            if len(value) > 28:
-                value = value[:27] + "…"
+            if len(value) > 24:
+                value = value[:23] + "…"
             grade = (tr.detail or {}).get("grade", {}).get("overall")
             if grade:
                 value = f"{value} [{grade}]"
-            mark = "OK" if tr.passed else "NG"
-            text = f"{mark}  {tool.tool_id}: {value}"
-            # place the tag above the box; flip inside at the image top, and keep
-            # it below the region's status banner so they never overlap
-            left, top, right, bottom = draw.textbbox((0, 0), text, font=font)
-            tag_h = bottom - top + 8
-            ty = ay - tag_h if ay - tag_h >= 0 else ay + 2
-            if ty < banner_bottom:
-                ty = banner_bottom + 2
-            _label(draw, (ax + 4, ty + 4), text, tcolor, font)
+            mark = "✓" if tr.passed else "✗"
+            _place_tag(draw, box, f"{mark} {tool.tool_id}: {value}", tcolor, font, occupied, W, H)
 
+    # one big, unambiguous PASS / FAIL headline for the whole product
+    overall = all(r.passed for r in results) if results else True
+    _banner(draw, (12, 10), "PASS" if overall else "FAIL", GREEN if overall else RED, big)
     return np.array(img, dtype=np.uint8)

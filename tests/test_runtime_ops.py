@@ -23,6 +23,23 @@ def test_stats_yield_and_reject_reasons():
     assert "code1" not in reasons  # code1 passed -> not a reject reason
 
 
+def test_live_view_latches_verdict_through_pre_inspection_frames():
+    """The runner pushes a fresh frame (empty results) before inspecting, then the
+    results. The on-screen verdict must NOT flicker to PASS on the empty update —
+    LiveView keeps the last real results until new ones arrive."""
+    import numpy as np
+
+    from vis.engine.frame import Frame
+    from vis.runtime import LiveView
+
+    lv = LiveView()
+    img = np.zeros((8, 8, 3), np.uint8)
+    lv.update(Frame("c", 1, img, 0.0), [_region(False)])      # inspected: FAIL
+    assert not lv.latest("c")[1][0].passed
+    lv.update(Frame("c", 2, img, 0.0), [])                     # next fresh frame, empty
+    assert not lv.latest("c")[1][0].passed                    # still FAIL, not PASS
+
+
 def test_cycle_time_tracks_last_and_smoothed_average():
     stats = LiveStats()
     assert stats.cycle_ms() == {"last": 0.0, "avg": 0.0}  # nothing yet

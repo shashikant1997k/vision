@@ -29,6 +29,22 @@ def _scene(shift_x=0, shift_y=0):
     return canvas
 
 
+def test_locator_clamps_to_taught_line_on_busy_background():
+    """A security-mesh background makes every row 'active' so Otsu merges all
+    lines into one tall band; the locator must clamp to the taught box's rows so
+    a read stays on the line the operator drew (not a neighbouring line)."""
+    rng = np.random.default_rng(0)
+    # busy mesh background (mid-grey speckle) so every row has foreground
+    canvas = rng.integers(120, 200, size=(180, 320, 3), dtype=np.uint8)
+    canvas[40:70, 40:240] = _render_text("BNOTEST", 200, 30)   # top line (taught)
+    canvas[100:130, 40:240] = _render_text("EXP1026", 200, 30)  # bottom line
+    taught = (40, 40, 200, 30)  # the top line's box
+    band = locate_text_band(canvas, prefer=taught)
+    # without the clamp the band would span both lines (~100+ px); clamped it
+    # stays near the taught box height (30 px + small pad), well under both lines
+    assert band.shape[0] <= 30 + 20
+
+
 def _recipe(margin):
     config = {"expected": "LOT42", "uppercase": True}
     if margin:

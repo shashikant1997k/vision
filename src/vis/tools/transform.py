@@ -81,6 +81,17 @@ def locate_text_band(image, pad: int = 6, prefer=None) -> np.ndarray:
         y0, y1 = min(bands, key=lambda b: abs((b[0] + b[1]) / 2 - centre))
     y0 = max(0, y0 - pad)
     y1 = min(arr.shape[0], y1 + pad)
+    # If band detection merged several lines into one tall band — a busy/textured
+    # or security-mesh background defeats Otsu, so every row reads as "active" —
+    # the read would grab a neighbouring line (e.g. EXP when B.No was taught).
+    # When the band is much taller than the taught box, clamp to the taught box's
+    # own rows so the read stays on the line the operator actually drew.
+    if prefer is not None:
+        ph = max(1, int(prefer[3]))
+        if (y1 - y0) > 1.8 * ph:
+            py = int(prefer[1])
+            y0 = max(0, py - pad)
+            y1 = min(arr.shape[0], py + ph + pad)
     # full width: only the LINE needs isolating (neighbouring lines above/below
     # are what corrupt the read); horizontal drift is handled by recognition
     return arr[y0:y1]

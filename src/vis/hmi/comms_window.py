@@ -29,6 +29,7 @@ DEFAULTS = {
     "io_port": 502,
     "ntp_server": "",
     "web_enabled": False,
+    "web_host": "0.0.0.0",  # 0.0.0.0 = reachable on the LAN; 127.0.0.1 = local only
     "web_port": 9480,
     "web_token": "",
     "signals": SignalMap().to_dict(),
@@ -87,10 +88,16 @@ class CommsWindow(QMainWindow):
         self._web_port = QSpinBox()
         self._web_port.setRange(1024, 65535)
         self._web_port.setValue(int(config.get("web_port", 9480)))
+        self._web_host = QLineEdit(config.get("web_host", "0.0.0.0"))
+        self._web_host.setToolTip(
+            "Bind address. 0.0.0.0 = reachable from other PCs on the network "
+            "(open the line PC's IP:port). 127.0.0.1 = this PC only (localhost)."
+        )
         self._web_token = QLineEdit(config.get("web_token", ""))
         self._web_token.setPlaceholderText("bearer token (required for /api/*)")
         web_form = QFormLayout()
         web_form.addRow(self._web_enabled)
+        web_form.addRow("Bind address", self._web_host)
         web_form.addRow("Web port", self._web_port)
         web_form.addRow("API token", self._web_token)
         web_box = QGroupBox("Read-only web monitoring (remote dashboard)")
@@ -241,6 +248,7 @@ class CommsWindow(QMainWindow):
             "io_port": self._io_port.value(),
             "ntp_server": self._ntp_server.text().strip(),
             "web_enabled": self._web_enabled.isChecked(),
+            "web_host": self._web_host.text().strip() or "0.0.0.0",
             "web_port": self._web_port.value(),
             "web_token": self._web_token.text().strip(),
             "signals": signals,

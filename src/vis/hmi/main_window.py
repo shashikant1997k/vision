@@ -833,7 +833,8 @@ class MainWindow(QMainWindow):
             from ..integrations.web_api import ReadOnlyApiServer
 
             self._web = ReadOnlyApiServer(
-                self._sf, port=int(config.get("web_port", 9480)),
+                self._sf, host=config.get("web_host", "0.0.0.0"),
+                port=int(config.get("web_port", 9480)),
                 token=config.get("web_token", ""),
                 status_provider=self._proto_status, counters_provider=self._proto_counters,
             ).start()

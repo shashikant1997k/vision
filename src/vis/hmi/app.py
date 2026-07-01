@@ -146,6 +146,24 @@ def main() -> int:
     apply_camera_config()
 
     app = QApplication(sys.argv)
+
+    # Keep the app alive on an unhandled exception in a Qt slot (PySide6 otherwise
+    # aborts the whole process). Log it and surface a message instead of closing.
+    import traceback as _tb
+
+    def _excepthook(exc_type, exc, tb):
+        _tb.print_exception(exc_type, exc, tb)
+        try:
+            from PySide6.QtWidgets import QApplication as _QA
+            w = _QA.activeWindow()
+            bar = getattr(w, "statusBar", None)
+            if callable(bar):
+                bar().showMessage(f"Error: {exc}")
+        except Exception:
+            pass
+
+    sys.excepthook = _excepthook
+
     from .theme import apply_theme
     from .wheel_guard import WheelGuard
 

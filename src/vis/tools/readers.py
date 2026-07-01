@@ -80,3 +80,12 @@ def _builtin_code(image, config):
 
 register_text_reader("builtin", _builtin_text)
 register_code_reader("builtin", _builtin_code)
+
+# In-house CRNN/CTC ONNX recogniser (ocr-trainer). Registers "vis_ocr" only if
+# onnxruntime + the model file are present; a silent no-op otherwise.
+try:  # pragma: no cover - optional dependency / artifact
+    from .vis_ocr_reader import register as _register_vis_ocr
+
+    _register_vis_ocr()
+except Exception:
+    pass

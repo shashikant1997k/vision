@@ -234,6 +234,12 @@ class TeachWindow(QMainWindow):
         for d in INSPECTION_TYPES:
             if d.get("category") == "read":
                 _palette_btn(d["label"], d["key"])
+        ai_btn = QPushButton("✨  Auto-detect text lines (AI)")
+        ai_btn.setStyleSheet("text-align:left; padding:5px 8px")
+        ai_btn.setToolTip("Draw ONE box around a block of text — AI finds each line, "
+                          "adds a text tool per line, and pre-fills what it reads.")
+        ai_btn.clicked.connect(self._arm_auto_lines)
+        palette_layout.addWidget(ai_btn)
         _section("Measure & check")
         for d in INSPECTION_TYPES:
             if d.get("category") == "inspect":
@@ -692,6 +698,11 @@ class TeachWindow(QMainWindow):
         self._pending = ("tool", type_key)
         self._set_guide(f"Now drag a box around the {_FRIENDLY[type_key].split('(')[0].strip()} on the image.")
 
+    def _arm_auto_lines(self) -> None:
+        self._pending = ("auto_lines",)
+        self._set_guide("Now drag ONE box around a block of text — AI will split it into "
+                        "lines, add a text tool for each, and pre-fill the read.")
+
     def _arm_region(self) -> None:
         self._pending = ("region",)
         self._set_guide("Now drag a box around the product / area on the image.")
@@ -710,6 +721,10 @@ class TeachWindow(QMainWindow):
         self._last_results = None
         if self._pending[0] == "locator":
             self._set_locator(x, y, w, h)
+            return
+        if self._pending[0] == "auto_lines":
+            self._auto_detect_lines(x, y, w, h)
+            self._pending = None
             return
         if self._pending[0] == "region":
             idx = self._model.add_region(
@@ -750,6 +765,59 @@ class TeachWindow(QMainWindow):
         self._pending = None
         self._rebuild_tree()
         self._refresh_view()
+
+    def _auto_detect_lines(self, x: int, y: int, w: int, h: int) -> None:
+        """AI: split one drawn box into text lines -> one OCV text tool per line,
+        each pre-filled with what the recogniser reads."""
+        from ..tools.line_detector import get_line_detector
+
+        det = get_line_detector()
+        if det is None:
+            self._set_guide("AI line detector unavailable (model not found) — "
+                            "draw each line with Read Text instead.")
+            return
+        teach = self._teach_image()
+        crop = teach[y:y + h, x:x + w]
+        try:
+            boxes = det.detect(crop, conf=0.4)
+        except Exception as exc:  # noqa: BLE001
+            self._status.setText(f"Auto-detect failed: {exc}")
+            return
+        if not boxes:
+            self._set_guide("AI found no text lines there — try a tighter box, or Read Text.")
+            return
+        try:
+            from ..tools.readers import get_text_reader
+            reader = get_text_reader("vis_ocr")
+        except Exception:  # noqa: BLE001
+            reader = None
+        region_index = self._ensure_region()
+        region = self._model.regions[region_index]
+        added = 0
+        for (bx, by, bw, bh, _score) in boxes:
+            ax, ay = x + bx, y + by                          # absolute (teach-image) coords
+            rel = ROI(max(0, ax - region.roi.x), max(0, ay - region.roi.y), bw, bh)
+            count = sum(len(r.tools) for r in self._model.regions) + 1
+            text = ""
+            if reader is not None:
+                try:
+                    text = (reader(teach[ay:ay + bh, ax:ax + bw], {})[0] or "").strip()
+                except Exception:  # noqa: BLE001
+                    text = ""
+            if "ocv_text" in MATCH_TOOLS:
+                config = tool_config("ocv_text", text)
+            else:
+                config = default_config("ocv_text")
+                if text:
+                    config["expected"], config["match"] = text, "exact"
+            config["search_x"], config["search_y"] = 20, 20
+            self._model.add_tool(region_index, "text" + str(count), "ocv_text", rel, config)
+            added += 1
+        self._selected = None
+        self._rebuild_tree()
+        self._refresh_view()
+        self._set_guide(f"AI added {added} text line(s) with pre-filled reads — "
+                        "review each below, then Test.")
 
     def _teach_image(self):
         from ..tools.transform import rotate_image

@@ -150,11 +150,15 @@ def draw_layout(image: np.ndarray, recipe, highlight=None) -> np.ndarray:
 
     img = Image.fromarray(np.ascontiguousarray(image)).convert("RGB")
     draw = ImageDraw.Draw(img)
-    font = _font(16)
     arr = np.ascontiguousarray(image)
+    # line width + label size proportional to resolution, so boxes read cleanly
+    # on both small frames and high-res (4000px) blister photos
+    short = min(arr.shape[0], arr.shape[1])
+    lw = max(2, round(short / 700))
+    font = _font(max(16, round(short / 90)))
     for region in recipe.regions:
         rx, ry, rw, rh = region.roi.x, region.roi.y, region.roi.w, region.roi.h
-        _visible_rect(draw, arr, (rx, ry, rx + rw - 1, ry + rh - 1), BLUE, width=2)
+        _visible_rect(draw, arr, (rx, ry, rx + rw - 1, ry + rh - 1), BLUE, width=lw)
         _label(draw, (rx + 4, ry + 4), region.name, BLUE, font)
         _draw_locator(draw, region, font)
         for tool in region.tools:
@@ -166,13 +170,13 @@ def draw_layout(image: np.ndarray, recipe, highlight=None) -> np.ndarray:
                     (ax - mx, ay - my, ax + tool.roi.w - 1 + mx, ay + tool.roi.h - 1 + my),
                     SEARCH,
                 )
-            _visible_rect(draw, arr, (ax, ay, ax + tool.roi.w - 1, ay + tool.roi.h - 1), BLUE, width=3)
+            _visible_rect(draw, arr, (ax, ay, ax + tool.roi.w - 1, ay + tool.roi.h - 1), BLUE, width=lw + 1)
             ty = ay - 18 if ay >= 18 else ay + 2
             friendly = _FRIENDLY.get(tool.tool_type, tool.tool_type)
             _label(draw, (ax + 2, ty), f"{tool.tool_id} · {friendly}", BLUE, font)
     if highlight is not None:
         hx, hy, hw, hh = highlight
-        draw.rectangle([hx - 1, hy - 1, hx + hw, hy + hh], outline=YELLOW, width=3)
+        draw.rectangle([hx - 1, hy - 1, hx + hw, hy + hh], outline=YELLOW, width=lw + 1)
     return np.array(img, dtype=np.uint8)
 
 

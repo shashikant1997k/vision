@@ -47,7 +47,8 @@ def _make_camera_factory():
     1. Hikrobot MVS SDK   (VIS_CAMERA=hikrobot, or auto when the SDK imports) — line PC
     2. Aravis GigE Vision (VIS_CAMERA=aravis, or auto when Aravis imports) — macOS/dev
     3. GenTL / Harvester  (VIS_GENTL_CTI set — any GigE Vision camera)
-    4. Simulator          (development; the HMI shows a SIMULATION banner)
+    4. File replay        (VIS_CAMERA=file, VIS_FILE_DIR=dir — real saved images; dev on macOS)
+    5. Simulator          (development; the HMI shows a SIMULATION banner)
     Returns (factory, simulation)."""
     import os
 
@@ -116,6 +117,23 @@ def _make_camera_factory():
             return camera
 
         return gige_factory, False
+
+    if choice == "file":
+        def file_factory(camera_id, settings, recipe):
+            from pathlib import Path
+            from ..camera.file_source import FileCamera
+            from ..camera.settings_store import load_settings
+
+            directory = os.environ.get("VIS_FILE_DIR") or str(
+                Path(__file__).resolve().parents[3] / "teachimage"
+            )
+            settings = settings or load_settings(camera_id)
+            camera = FileCamera(camera_id, directory=directory, loop=True, settings=settings)
+            camera.open()
+            return camera
+
+        return file_factory, False
+
     return _sim_factory, True
 
 

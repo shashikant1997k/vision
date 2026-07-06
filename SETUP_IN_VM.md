@@ -85,14 +85,30 @@ VIS_CAMERA=aravis .venv/bin/vis-hmi
 On Linux the continuous stream should be stable now (direct NIC + raised socket
 buffers) — no more disconnects/packet-loss like on macOS.
 
-## 7. ocr-trainer (data gen / eval here; training on RunPod)
-The provisioner already made its venv. Verify:
+## 7. OCR is already trained — enable the reader
+The trained models ship in the repo at `~/camera/ocr-trainer/model/`:
+`ocrab_svtr256.onnx` (recommended recogniser, 93.5% char / 63.5% field on real
+blisters) + `textline_det.onnx` (line detector) + sidecar charsets. The vision
+app auto-discovers this path (`~/camera/ocr-trainer/model`) — no config needed.
+Turn the reader on when launching the app:
+```bash
+cd ~/camera/vision
+VIS_TEXT_READER=vis_ocr VIS_CAMERA=aravis .venv/bin/vis-hmi
+```
+Verify the models are present and load:
+```bash
+ls -lh ~/camera/ocr-trainer/model/*.onnx     # svtr256 (~28M) + textline_det (~10M)
+~/camera/vision/.venv/bin/python -c "from vis.tools.vis_ocr_reader import _find_model; print(_find_model())"
+```
+(fp32 svtr256 is used, not INT8 — INT8 is slower on ARM per `model/README.md`.)
+
+## 8. ocr-trainer (retrain / eval; training on RunPod)
+The provisioner made its venv. Data generation and ONNX evaluation run here; GPU
+training runs on RunPod (no torch in this venv). Full plan: `ocr-trainer/START_HERE.md`.
 ```bash
 cd ~/camera/ocr-trainer
 ./.venv/bin/python -c "import ocrtrainer.synth as s; print('synth OK')"
 ```
-Full training plan is in `ocr-trainer/START_HERE.md`. Data generation and ONNX
-evaluation run here; GPU training runs on RunPod (no torch in this venv).
 
 ---
 

@@ -25,7 +25,8 @@ def _candidate_paths() -> list[Path]:
     if env:
         paths.append(Path(env))
     for d in (Path.home() / ".vision-inspection",
-              Path.home() / "Personal/camera/ocr-trainer/model",
+              Path.home() / "Personal/camera/ocr-trainer/model",   # Mac dev layout
+              Path.home() / "camera/ocr-trainer/model",            # Linux VM layout
               Path.cwd() / "model"):
         paths.append(d / "textline_det.onnx")
     return paths

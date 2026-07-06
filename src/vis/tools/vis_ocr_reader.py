@@ -30,7 +30,8 @@ def _candidate_model_paths() -> list[Path]:
         paths.append(Path(env))
     dirs = [
         Path.home() / ".vision-inspection",                    # deployed location
-        Path.home() / "Personal/camera/ocr-trainer/model",
+        Path.home() / "Personal/camera/ocr-trainer/model",     # Mac dev layout
+        Path.home() / "camera/ocr-trainer/model",              # Linux VM layout
         Path.cwd() / "model",
     ]
     # prefer the OCR-A/B SVTR model, fall back to the older vis_ocr.onnx

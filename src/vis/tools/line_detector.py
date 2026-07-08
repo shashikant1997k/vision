@@ -24,10 +24,16 @@ def _candidate_paths() -> list[Path]:
     env = os.environ.get("VIS_DET_MODEL")
     if env:
         paths.append(Path(env))
-    for d in (Path.home() / ".vision-inspection",
-              Path.home() / "Personal/camera/ocr-trainer/model",   # Mac dev layout
-              Path.home() / "camera/ocr-trainer/model",            # Linux VM layout
-              Path.cwd() / "model"):
+    dirs = [Path.home() / ".vision-inspection",
+            Path.home() / "Personal/camera/ocr-trainer/model",   # Mac dev layout
+            Path.home() / "camera/ocr-trainer/model",            # Linux VM layout
+            Path.cwd() / "model"]
+    # parallel-repo layout: <parent of the camera project>/ocr-trainer/model
+    try:
+        dirs.append(Path(__file__).resolve().parents[3].parent / "ocr-trainer" / "model")
+    except Exception:
+        pass
+    for d in dirs:
         paths.append(d / "textline_det.onnx")
     return paths
 

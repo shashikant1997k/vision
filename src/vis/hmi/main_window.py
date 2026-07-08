@@ -340,6 +340,15 @@ class MainWindow(QMainWindow):
         info.addLayout(job_form)
         info.addWidget(self._test_box)
         info.addWidget(self._state)
+        info.addWidget(_section_label("SCANNED DATA"))
+        self._scanned = QLabel("—")
+        self._scanned.setWordWrap(True)
+        self._scanned.setTextFormat(Qt.RichText)
+        self._scanned.setStyleSheet(
+            "background:#ffffff; border:1px solid #d9dee8; border-radius:6px; "
+            "padding:6px; font-family:Consolas,monospace; font-size:13px"
+        )
+        info.addWidget(self._scanned)
         info.addWidget(_section_label("RESULTS"))
         info.addWidget(self._results_table, 1)
         info.addLayout(totals_row)
@@ -1572,6 +1581,31 @@ class MainWindow(QMainWindow):
             return None
         return (x0, y0, x1, y1)
 
+    def _update_scanned_data(self) -> None:
+        """Live 'Scanned data' readout (CodeScan-style): the current product's
+        decoded value per field, green = pass / red = fail, beside the image."""
+        import html
+
+        lines = []
+        for cid in self._camera_ids:
+            latest = self._live.latest(cid)
+            if latest is None:
+                continue
+            _frame, results = latest
+            for r in results:
+                for tr in r.tool_results:
+                    value = "" if tr.measured_value is None else str(tr.measured_value)
+                    value = value.replace("\x1d", "·") or "(no read)"
+                    if len(value) > 34:
+                        value = value[:33] + "…"
+                    color = "#0a8a0a" if tr.passed else "#d21f1f"
+                    mark = "✓" if tr.passed else "✗"
+                    lines.append(
+                        f'<span style="color:{color}">{mark} <b>{html.escape(tr.tool_id)}</b>'
+                        f": {html.escape(value)}</span>"
+                    )
+        self._scanned.setText("<br>".join(lines) if lines else "—")
+
     def _refresh(self) -> None:
         snap = self._stats.snapshot()
         for cid, label in self._cam_images.items():
@@ -1593,6 +1627,7 @@ class MainWindow(QMainWindow):
             if cam:  # per-camera pass/fail on the tab label
                 idx = list(self._cam_images).index(cid)
                 self._cam_tabs.setTabText(idx, f"{cid}  {cam.get('passed', 0)}✓/{cam.get('failed', 0)}✗")
+        self._update_scanned_data()
         self._update_results_table(snap)
         totals = self._stats.totals()
         self._total.setText(str(totals["total"]))

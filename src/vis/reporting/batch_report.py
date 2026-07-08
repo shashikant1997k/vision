@@ -113,6 +113,44 @@ def to_csv(session, batch_id: int) -> str:
     return buf.getvalue()
 
 
+def _reject_images_html(session, batch_id: int, limit: int = 24) -> str:
+    """Embed the archived reject images (product crops) as base64 data URIs so
+    the report stays ONE portable file (email/print/regulator-safe). Newest
+    first, capped at `limit` with the total noted."""
+    import base64
+
+    from sqlalchemy import select
+
+    from ..db.models import FrameCapture
+
+    rows = session.execute(
+        select(FrameCapture)
+        .where(FrameCapture.batch_id == batch_id, FrameCapture.passed.is_(False))
+        .order_by(FrameCapture.id.desc())
+    ).scalars().all()
+    with_img = [r for r in rows if r.image_ref and os.path.isfile(r.image_ref)]
+    if not with_img:
+        return ""
+    cells = []
+    for r in with_img[:limit]:
+        try:
+            data = base64.b64encode(Path(r.image_ref).read_bytes()).decode("ascii")
+        except OSError:
+            continue
+        cells.append(
+            f'<figure style="display:inline-block;margin:6px;text-align:center">'
+            f'<img src="data:image/png;base64,{data}" '
+            f'style="max-width:260px;max-height:180px;border:2px solid #c33"/>'
+            f"<figcaption>frame {r.frame_id} · {html.escape(r.camera_id)}"
+            f" · {html.escape((r.created_at or '')[:19])}</figcaption></figure>"
+        )
+    if not cells:
+        return ""
+    note = (f" (showing latest {limit} of {len(with_img)})"
+            if len(with_img) > limit else "")
+    return f"<h2>Reject images{html.escape(note)}</h2><div>{''.join(cells)}</div>"
+
+
 def write_batch_report(session_factory, batch_id: int, directory: str) -> tuple[str, str]:
     """Write the signed HTML report + CSV export for a batch. Returns the paths."""
     os.makedirs(directory, exist_ok=True)
@@ -124,7 +162,8 @@ def write_batch_report(session_factory, batch_id: int, directory: str) -> tuple[
             signature_line = (
                 f"Released by user#{signature.user_id} — {signature.meaning} @ {signature.ts}"
             )
-        html_text = to_html(summary, signature_line=signature_line)
+        images_html = _reject_images_html(s, batch_id)
+        html_text = to_html(summary, signature_line=signature_line, images_html=images_html)
         csv_text = to_csv(s, batch_id)
 
     html_path = os.path.join(directory, f"batch_{batch_id}.html")
@@ -134,7 +173,7 @@ def write_batch_report(session_factory, batch_id: int, directory: str) -> tuple[
     return html_path, csv_path
 
 
-def to_html(summary: dict, signature_line: str = "") -> str:
+def to_html(summary: dict, signature_line: str = "", images_html: str = "") -> str:
     def kv_table(pairs):
         return "".join(
             f"<tr><td>{html.escape(str(k))}</td><td>{html.escape(_disp(v))}</td></tr>"
@@ -236,6 +275,7 @@ td,th{{border:1px solid #ccc;padding:4px 12px;text-align:left}}h1{{font-size:1.3
 {oee_section}
 <h2>Rejects by lane</h2><table><tr><th>Lane</th><th>Count</th></tr>{count_table(summary['rejects_by_lane'], 'rejects')}</table>
 <h2>Defects by tool (Pareto)</h2><table><tr><th>Tool</th><th>Count</th></tr>{count_table(summary['defects_by_tool'], 'defects')}</table>
+{images_html}
 <div class="sig">{html.escape(signature_line) if signature_line else 'Not yet released.'}</div>
 <p class="note">Code grades are approximate process-control indicators, NOT certified ISO 15415/15416 verifier grades.</p>
 </body></html>"""

@@ -162,6 +162,7 @@ def test_main_window_yield_reasons_and_reject_review(qapp):
 
     review = ReviewWindow(window._failed_log, window._recipe)
     assert review._counter.text().startswith("Reject ") and "/" in review._counter.text()
-    assert "Failed:" in review._info.text()
+    # the big red 'why' panel names the failed field(s) with the read value
+    assert "✗" in review._why.text() and "read" in review._why.text()
     window.stop()
     assert window._state.text() == "● Idle"

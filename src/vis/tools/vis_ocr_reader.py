@@ -34,6 +34,12 @@ def _candidate_model_paths() -> list[Path]:
         Path.home() / "camera/ocr-trainer/model",              # Linux VM layout
         Path.cwd() / "model",
     ]
+    # parallel-repo layout: <parent of the camera project>/ocr-trainer/model
+    # (this file is .../camera/src/vis/tools/vis_ocr_reader.py -> parents[3]=camera)
+    try:
+        dirs.append(Path(__file__).resolve().parents[3].parent / "ocr-trainer" / "model")
+    except Exception:
+        pass
     # prefer the OCR-A/B SVTR model, fall back to the older vis_ocr.onnx
     names = ["ocrab_svtr256.onnx", "vis_ocr.onnx"]
     for d in dirs:

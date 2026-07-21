@@ -133,6 +133,38 @@ class VisOcrReader:
         logits = np.asarray(out)[:, 0, :]
         return self._decode(logits)
 
+    # ---- OCV verification (calibrated CTC-forward scoring) -----------------
+    def _calibration(self) -> dict:
+        if not hasattr(self, "_calib"):
+            import json
+
+            path = Path.home() / ".vision-inspection" / "vis_ocr_verify.json"
+            try:
+                self._calib = json.loads(path.read_text())
+            except Exception:
+                self._calib = {"temperature": 1.0, "max_llr_per_char": 1.0,
+                               "min_logprob_per_char": -3.0}
+        return self._calib
+
+    def verify_expected(self, image, expected: str) -> dict:
+        """Score 'does this crop print `expected`?' — calibrated log-likelihood
+        ratio via the CTC forward algorithm (near-zero false accepts on wrong
+        strings; see ocv_score). Returns the ocv_score.verify dict + the read."""
+        from .ocv_score import verify
+
+        self._ensure()
+        x = _preprocess(image)
+        logits = np.asarray(self._sess.run(None, {self._input: x})[0])[:, 0, :]
+        # charset indices (blank=0) for the expected string
+        stoi = {c: i for i, c in enumerate(self._itos)}
+        ids = [stoi[c] for c in expected if c in stoi]
+        cal = self._calibration()
+        res = verify(logits, ids, temperature=cal["temperature"],
+                     max_llr_per_char=cal["max_llr_per_char"],
+                     min_logprob_per_char=cal["min_logprob_per_char"])
+        res["read"], res["confidence"] = self._decode(logits)
+        return res
+
 
 def register(force: bool = False) -> bool:
     """Register the ``vis_ocr`` reader if onnxruntime + a model file are present.

@@ -33,8 +33,10 @@ def _candidate_paths() -> list[Path]:
         dirs.append(Path(__file__).resolve().parents[3].parent / "ocr-trainer" / "model")
     except Exception:
         pass
-    for d in dirs:
-        paths.append(d / "textline_det.onnx")
+    # prefer the OBB (any-angle) model; fall back to the axis-aligned v1
+    for name in ("textline_obb.onnx", "textline_det.onnx"):
+        for d in dirs:
+            paths.append(d / name)
     return paths
 
 
@@ -87,9 +89,11 @@ class LineDetector:
         self._sess = ort.InferenceSession(str(self.model_path), providers=["CPUExecutionProvider"])
         self._input = self._sess.get_inputs()[0].name
 
-    def detect(self, image, conf: float = 0.4, iou: float = 0.45) -> list[tuple]:
-        """image: RGB (or grayscale) ndarray. Returns [(x,y,w,h,score)] in image
-        coordinates, sorted top-to-bottom."""
+    def detect_lines(self, image, conf: float = 0.4, iou: float = 0.45) -> list[dict]:
+        """Full-detail detection. Returns dicts sorted top-to-bottom:
+        {x, y, w, h, score, angle, cx, cy, rw, rh} where (x,y,w,h) is the
+        axis-aligned bounding box and (cx,cy,rw,rh,angle) the rotated box
+        (angle in radians; 0 for the axis-aligned v1 model)."""
         import cv2
 
         self._ensure()
@@ -101,22 +105,64 @@ class LineDetector:
         H, W = arr.shape[:2]
         lb, r, left, top = _letterbox(arr)
         x = (lb.astype(np.float32) / 255.0).transpose(2, 0, 1)[None]   # (1,3,640,640) RGB
-        out = np.squeeze(self._sess.run(None, {self._input: x})[0], 0).T  # (N, 4+nc)
+        out = np.squeeze(self._sess.run(None, {self._input: x})[0], 0).T  # (N, 5) or (N, 6)
+        has_angle = out.shape[1] >= 6
         scores = out[:, 4]
         m = scores >= conf
         out, scores = out[m], scores[m]
         if len(out) == 0:
             return []
         cx, cy, bw, bh = out[:, 0], out[:, 1], out[:, 2], out[:, 3]
-        boxes = np.stack([cx - bw / 2, cy - bh / 2, cx + bw / 2, cy + bh / 2], 1)
+        ang = out[:, 5] if has_angle else np.zeros(len(out))
+        # AABB of the (possibly rotated) box, for NMS + compatibility
+        ca, sa = np.abs(np.cos(ang)), np.abs(np.sin(ang))
+        ew, eh = bw * ca + bh * sa, bw * sa + bh * ca
+        boxes = np.stack([cx - ew / 2, cy - eh / 2, cx + ew / 2, cy + eh / 2], 1)
         res = []
         for i in _nms(boxes, scores, iou):
             x1 = max(0, min(W, (boxes[i, 0] - left) / r)); y1 = max(0, min(H, (boxes[i, 1] - top) / r))
             x2 = max(0, min(W, (boxes[i, 2] - left) / r)); y2 = max(0, min(H, (boxes[i, 3] - top) / r))
-            if x2 - x1 >= 3 and y2 - y1 >= 3:
-                res.append((int(x1), int(y1), int(x2 - x1), int(y2 - y1), float(scores[i])))
-        res.sort(key=lambda b: b[1])
+            if x2 - x1 < 3 or y2 - y1 < 3:
+                continue
+            a = float(ang[i])
+            rw, rh = float(bw[i] / r), float(bh[i] / r)
+            if rh > rw:                       # normalise: long side = reading axis
+                rw, rh = rh, rw
+                a += np.pi / 2
+            a = (a + np.pi / 2) % np.pi - np.pi / 2   # wrap to (-90, 90] deg
+            res.append({
+                "x": int(x1), "y": int(y1), "w": int(x2 - x1), "h": int(y2 - y1),
+                "score": float(scores[i]), "angle": a,
+                "cx": float((cx[i] - left) / r), "cy": float((cy[i] - top) / r),
+                "rw": rw, "rh": rh,
+            })
+        res.sort(key=lambda b: b["y"])
         return res
+
+    def detect(self, image, conf: float = 0.4, iou: float = 0.45) -> list[tuple]:
+        """Compatibility API: [(x,y,w,h,score)] axis-aligned, top-to-bottom."""
+        return [(d["x"], d["y"], d["w"], d["h"], d["score"])
+                for d in self.detect_lines(image, conf, iou)]
+
+    @staticmethod
+    def deskew_crop(image, line: dict, pad: float = 0.08):
+        """Extract the rotated line upright (text horizontal) — feeds the
+        recogniser a clean crop regardless of part rotation."""
+        import cv2
+
+        arr = np.asarray(image)
+        deg = np.degrees(line["angle"])
+        if abs(deg) < 2.0:                 # near-horizontal: plain crop, no resampling loss
+            x0, y0 = max(0, line["x"]), max(0, line["y"])
+            return arr[y0:y0 + line["h"], x0:x0 + line["w"]]
+        rw, rh = line["rw"] * (1 + pad), line["rh"] * (1 + 2 * pad)
+        M = cv2.getRotationMatrix2D((line["cx"], line["cy"]), deg, 1.0)
+        rot = cv2.warpAffine(arr, M, (arr.shape[1], arr.shape[0]),
+                             flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+        x0 = max(0, int(line["cx"] - rw / 2)); y0 = max(0, int(line["cy"] - rh / 2))
+        x1 = min(arr.shape[1], int(line["cx"] + rw / 2))
+        y1 = min(arr.shape[0], int(line["cy"] + rh / 2))
+        return rot[y0:y1, x0:x1]
 
 
 _DETECTOR = None

@@ -12,6 +12,7 @@ dependency. Model ``textline_det.onnx`` is produced by the ocr-trainer project.
 from __future__ import annotations
 
 import os
+import threading
 from pathlib import Path
 
 import numpy as np
@@ -80,14 +81,25 @@ class LineDetector:
     def __init__(self, model_path: Path) -> None:
         self.model_path = Path(model_path)
         self._sess = None
+        self._lock = threading.Lock()
+        self.fingerprint: str = ""  # sha256 of the loaded model (for audit)
 
     def _ensure(self) -> None:
         if self._sess is not None:
             return
-        import onnxruntime as ort
+        with self._lock:
+            if self._sess is not None:
+                return
+            import onnxruntime as ort
 
-        self._sess = ort.InferenceSession(str(self.model_path), providers=["CPUExecutionProvider"])
-        self._input = self._sess.get_inputs()[0].name
+            from .model_integrity import verify_model
+
+            self.fingerprint = verify_model(self.model_path, what="line-detector model")
+            sess = ort.InferenceSession(
+                str(self.model_path), providers=["CPUExecutionProvider"]
+            )
+            self._input = sess.get_inputs()[0].name
+            self._sess = sess
 
     def detect_lines(self, image, conf: float = 0.4, iou: float = 0.45) -> list[dict]:
         """Full-detail detection. Returns dicts sorted top-to-bottom:

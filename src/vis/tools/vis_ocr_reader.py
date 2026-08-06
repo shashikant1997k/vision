@@ -15,12 +15,13 @@ or the model file is absent, so importing this module is always safe.
 from __future__ import annotations
 
 import os
+import threading
 from pathlib import Path
 
 import numpy as np
 
 IMG_H = 32
-IMG_W = 256
+IMG_W = 256  # default; overridden per model by <model>.meta.json {"img_w": ...}
 
 
 def _candidate_model_paths() -> list[Path]:
@@ -64,20 +65,21 @@ def _to_gray(image) -> np.ndarray:
     return arr.astype(np.float32)
 
 
-def _preprocess(image) -> np.ndarray:
+def _preprocess(image, img_w: int = IMG_W) -> np.ndarray:
     """Grayscale, height 32, left-aligned on a white canvas, normalised [-1, 1].
     Mirrors ocrtrainer.dataset / evaluate exactly so the model sees its training
-    distribution."""
+    distribution. ``img_w`` is the model's trained input width (lines wider than
+    it are horizontally compressed, same as in training)."""
     import cv2
 
     gray = _to_gray(image)
     h, w = gray.shape[:2]
     if h < 1 or w < 1:
-        gray = np.full((IMG_H, IMG_W), 255.0, np.float32)
+        gray = np.full((IMG_H, img_w), 255.0, np.float32)
         h, w = gray.shape
-    new_w = max(1, min(IMG_W, int(round(w * IMG_H / h))))
+    new_w = max(1, min(img_w, int(round(w * IMG_H / h))))
     resized = cv2.resize(gray.astype(np.uint8), (new_w, IMG_H), interpolation=cv2.INTER_AREA)
-    canvas = np.full((IMG_H, IMG_W), 255, np.uint8)
+    canvas = np.full((IMG_H, img_w), 255, np.uint8)
     canvas[:, :new_w] = resized
     x = canvas.astype(np.float32) / 127.5 - 1.0
     return x[None, None]  # (1, 1, 32, W)
@@ -96,21 +98,33 @@ class VisOcrReader:
         self.model_path = Path(model_path)
         self._sess = None
         self._itos: list[str] = []
+        self._lock = threading.Lock()
+        self._img_w = IMG_W
+        self.fingerprint: str = ""  # sha256 of the loaded model (for audit)
 
     def _ensure(self) -> None:
         if self._sess is not None:
             return
-        import onnxruntime as ort
+        with self._lock:
+            if self._sess is not None:  # lost the race — already built
+                return
+            import onnxruntime as ort
 
-        # per-model sidecar (<model>.charset.txt) wins, else shared charset.txt
-        per = self.model_path.with_name(self.model_path.stem + ".charset.txt")
-        charset_path = per if per.is_file() else self.model_path.with_name("charset.txt")
-        charset = charset_path.read_text(encoding="utf-8").strip("\n")
-        self._itos = ["<blank>"] + list(charset)
-        self._sess = ort.InferenceSession(
-            str(self.model_path), providers=["CPUExecutionProvider"]
-        )
-        self._input = self._sess.get_inputs()[0].name
+            from .model_integrity import model_meta, verify_model
+
+            # integrity first: refuse corrupted/swapped model files (GMP)
+            self.fingerprint = verify_model(self.model_path, what="vis_ocr model")
+            self._img_w = int(model_meta(self.model_path).get("img_w", IMG_W))
+            # per-model sidecar (<model>.charset.txt) wins, else shared charset.txt
+            per = self.model_path.with_name(self.model_path.stem + ".charset.txt")
+            charset_path = per if per.is_file() else self.model_path.with_name("charset.txt")
+            charset = charset_path.read_text(encoding="utf-8").strip("\n")
+            self._itos = ["<blank>"] + list(charset)
+            sess = ort.InferenceSession(
+                str(self.model_path), providers=["CPUExecutionProvider"]
+            )
+            self._input = sess.get_inputs()[0].name
+            self._sess = sess  # publish last, after everything is ready
 
     def _decode(self, logits: np.ndarray) -> tuple[str, float]:
         # logits: (T, C) for a single sample
@@ -128,7 +142,7 @@ class VisOcrReader:
 
     def __call__(self, image, config=None) -> tuple[str, float]:
         self._ensure()
-        x = _preprocess(image)
+        x = _preprocess(image, self._img_w)
         out = self._sess.run(None, {self._input: x})[0]  # (T, 1, C)
         logits = np.asarray(out)[:, 0, :]
         return self._decode(logits)
@@ -138,10 +152,19 @@ class VisOcrReader:
         if not hasattr(self, "_calib"):
             import json
 
+            from .model_integrity import strict_mode
+
             path = Path.home() / ".vision-inspection" / "vis_ocr_verify.json"
             try:
                 self._calib = json.loads(path.read_text())
-            except Exception:
+            except Exception as exc:
+                if strict_mode():
+                    # OCV accept/reject thresholds are validated configuration —
+                    # never fall back silently on the line PC.
+                    raise RuntimeError(
+                        f"OCV calibration missing/unreadable ({path}): {exc}. "
+                        "Deploy vis_ocr_verify.json or unset VIS_MODEL_STRICT."
+                    ) from exc
                 self._calib = {"temperature": 1.0, "max_llr_per_char": 1.0,
                                "min_logprob_per_char": -3.0}
         return self._calib
@@ -153,7 +176,7 @@ class VisOcrReader:
         from .ocv_score import verify
 
         self._ensure()
-        x = _preprocess(image)
+        x = _preprocess(image, self._img_w)
         logits = np.asarray(self._sess.run(None, {self._input: x})[0])[:, 0, :]
         # charset indices (blank=0) for the expected string
         stoi = {c: i for i, c in enumerate(self._itos)}
@@ -174,9 +197,11 @@ def register(force: bool = False) -> bool:
     except Exception:
         return False
     model = _find_model()
-    if model is None and not force:
+    if model is None:
+        # never register a reader bound to a nonexistent file — it would only
+        # blow up at first use, deep inside an inspection cycle
         return False
     from .readers import register_text_reader
 
-    register_text_reader("vis_ocr", VisOcrReader(model or _candidate_model_paths()[0]))
+    register_text_reader("vis_ocr", VisOcrReader(model))
     return True

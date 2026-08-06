@@ -46,7 +46,7 @@ camera ──► pipeline ──► tools ──► aggregator ──► reject 
 
 | Layer | Where | What it does |
 |---|---|---|
-| Camera | `src/vis/camera/` | file replay, Aravis, GenTL, Hikrobot, simulator — one interface |
+| Camera | `src/vis/camera/` | file replay, GenTL, Hikrobot, simulator — one interface |
 | Recipe | `src/vis/domain/` | products → regions → tools + ROIs; what to inspect |
 | Pipeline | `src/vis/engine/` | crop regions/ROIs, run tools in a thread pool, aggregate |
 | Tools | `src/vis/tools/` | the inspections themselves (below) |
@@ -210,7 +210,7 @@ Useful environment variables:
 
 | Variable | Effect |
 |---|---|
-| `VIS_CAMERA` | `file` / `aravis` / `gige` / `hikrobot` |
+| `VIS_CAMERA` | `file` / `gige` / `hikrobot` |
 | `VIS_FILE_DIR` | image folder for `VIS_CAMERA=file` |
 | `VIS_TEXT_READER` | `vis_ocr` (trained model) or `builtin` |
 | `VIS_OCR_MODEL` | explicit model path |

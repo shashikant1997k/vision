@@ -59,10 +59,9 @@ field accuracy with grammar-constrained decoding**.
 
 **Blocked on the owner's decision**
 1. **Live camera on a Windows or Linux PC.** Nothing runs against real product
-   until this exists. macOS is ruled out. A Windows 11 VM on Apple Silicon was
-   being considered — note that Apple Silicon cannot dual-boot Windows, so it
-   would be a VM (ARM Windows + x64 GAPI through emulation), and the first thing
-   to prove is whether the vendor viewer streams at all before building on it.
+   until this exists. **This is a Windows-only product** (decided 2026-08); the Linux/Aravis backend
+   has been removed. The production path is `VIS_CAMERA=gige` with the vendor's
+   GenTL producer (Baumer GAPI). macOS is development-only.
 2. **Teach-flow rework** — the biggest remaining UX piece, deliberately not
    started: it needs to be designed around how the engineers actually set up a
    new product, not a guess.
@@ -88,7 +87,7 @@ field accuracy with grammar-constrained decoding**.
 
 | Decision | Why |
 |---|---|
-| macOS is a **development-only** platform | three driver stacks (Aravis, MVS app, MVS SDK under Rosetta) all fail to hold a GigE link; the same hardware works on Windows |
+| macOS is a **development-only** platform | three driver stacks all failed to hold a GigE link; the same hardware works on Windows |
 | Develop against **saved images** (`VIS_CAMERA=file`) | the whole pipeline runs natively at full speed with no camera and no VM |
 | **One model per print technology**, never one merged model | avoids cross-font confusion, keeps inference small, and stops every retrain from revalidating already-approved fonts |
 | **Capability packs** are the unit of sale, one binary | mirrors HALCON/MERLIC/Aurora; a new market is a new pack, not a new product |

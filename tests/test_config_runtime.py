@@ -58,10 +58,10 @@ def test_camera_selection_reaches_the_environment(tmp_path, monkeypatch):
     import os
 
     cfg = load(tmp_path, monkeypatch, {"camera": {
-        "source": "aravis", "device_id": "Baumer-VCXG-24C-700011045955",
+        "source": "gige", "device_id": "Baumer-VCXG-24C-700011045955",
         "grab_timeout_ms": 3000, "packet_size": 1500, "packet_delay": 8000}})
     cfg.apply_environment()
-    assert os.environ["VIS_CAMERA"] == "aravis"
+    assert os.environ["VIS_CAMERA"] == "gige"
     assert os.environ["VIS_CAMERA_DEVICE_ID"] == "Baumer-VCXG-24C-700011045955"
     assert os.environ["VIS_GRAB_TIMEOUT_MS"] == "3000"
     assert os.environ["VIS_GIGE_PACKET_SIZE"] == "1500"
@@ -116,24 +116,28 @@ def test_missing_sections_fall_back_to_defaults(tmp_path, monkeypatch):
 
 
 # ---- the values actually change behaviour --------------------------------
-def test_tuning_is_passed_to_the_aravis_worker(monkeypatch):
-    from vis.camera.aravis_proc import AravisProcessCamera
+def test_packet_size_reaches_the_gige_camera(monkeypatch):
+    """The Windows production path: the tuning must reach the GenICam node."""
+    from vis.camera.genicam import _gige_setting
 
-    monkeypatch.setenv("VIS_GIGE_PACKET_SIZE", "1500")
-    monkeypatch.setenv("VIS_GIGE_PACKET_DELAY", "8000")
-    cmd = AravisProcessCamera("cam1", device_id="SER1")._build_cmd()
-    assert "--packet-size" in cmd and "1500" in cmd
-    assert "--packet-delay" in cmd and "8000" in cmd
-    assert "--device-id" in cmd and "SER1" in cmd
+    monkeypatch.setenv("VIS_GIGE_PACKET_SIZE", "9000")
+    assert _gige_setting("VIS_GIGE_PACKET_SIZE", 1500) == 9000
 
 
-def test_tuning_is_omitted_when_not_configured(monkeypatch):
-    from vis.camera.aravis_proc import AravisProcessCamera
+def test_packet_size_defaults_to_a_safe_value(monkeypatch):
+    """1500 by default: a camera left on jumbo streams NOTHING on a NIC that
+    cannot pass jumbo frames."""
+    from vis.camera.genicam import _gige_setting
 
     monkeypatch.delenv("VIS_GIGE_PACKET_SIZE", raising=False)
-    monkeypatch.delenv("VIS_GIGE_PACKET_DELAY", raising=False)
-    cmd = AravisProcessCamera("cam1")._build_cmd()
-    assert "--packet-size" not in cmd and "--packet-delay" not in cmd
+    assert _gige_setting("VIS_GIGE_PACKET_SIZE", 1500) == 1500
+
+
+def test_bad_packet_value_falls_back_instead_of_crashing(monkeypatch):
+    from vis.camera.genicam import _gige_setting
+
+    monkeypatch.setenv("VIS_GIGE_PACKET_SIZE", "not-a-number")
+    assert _gige_setting("VIS_GIGE_PACKET_SIZE", 1500) == 1500
 
 
 def test_configured_device_id_selects_the_camera(monkeypatch):

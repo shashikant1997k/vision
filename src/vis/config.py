@@ -33,10 +33,10 @@ DEFAULTS: dict = {
     "report_dir": "",            # blank -> <data dir>/reports
     "station": "",               # station name (blank = single default camera)
     "camera": {
-        "source": "",            # gige | hikrobot | aravis | file | sim | "" (auto)
+        "source": "",            # gige | hikrobot | file | sim | "" (auto)
         "gentl_cti": "",         # path to the GenTL producer (.cti) for gige
         "index": 0,              # which discovered camera (when no device_id)
-        "device_id": "",         # EXACT camera: serial / Aravis device id. Survives
+        "device_id": "",         # EXACT camera, by serial number. Survives
                                  # re-discovery order, so prefer it over index.
         "map": "",               # multi-camera: "cam1=SERIAL1,cam2=SERIAL2" or
                                  # "cam1:0,cam2:1" (indexes)
@@ -135,7 +135,7 @@ class AppConfig:
         return bool(self._d.get("images", {}).get("write_analysis", True))
 
     def camera_device_id(self) -> str:
-        """Exact camera to open (serial / Aravis device id); blank = use index."""
+        """Exact camera to open (serial number); blank = use index."""
         return os.environ.get("VIS_CAMERA_DEVICE_ID") or self._d.get("camera", {}).get("device_id", "")
 
     def camera_grab_timeout_ms(self) -> int:

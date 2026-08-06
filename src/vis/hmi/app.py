@@ -49,10 +49,10 @@ def _hik_device_for(camera_id: str) -> dict:
 def _make_camera_factory():
     """Pick the acquisition source, best first:
     1. Hikrobot MVS SDK   (VIS_CAMERA=hikrobot, or auto when the SDK imports) — line PC
-    2. Aravis GigE Vision (VIS_CAMERA=aravis, or auto when Aravis imports) — macOS/dev
-    3. GenTL / Harvester  (VIS_GENTL_CTI set — any GigE Vision camera)
-    4. File replay        (VIS_CAMERA=file, VIS_FILE_DIR=dir — real saved images; dev on macOS)
-    5. Simulator          (development; the HMI shows a SIMULATION banner)
+    2. GenTL / Harvester  (VIS_CAMERA=gige + VIS_GENTL_CTI — any GigE Vision
+       camera; this is the Baumer GAPI / MVS path on the Windows line PC)
+    3. File replay        (VIS_CAMERA=file, VIS_FILE_DIR=dir — real saved images)
+    4. Simulator          (development; the HMI shows a SIMULATION banner)
     Returns (factory, simulation)."""
     import os
 
@@ -67,16 +67,6 @@ def _make_camera_factory():
         except Exception:
             return False
 
-    def aravis_available() -> bool:
-        # NB: never import Aravis in the app's (venv) Python — on macOS the pip
-        # PyGObject binding segfaults. Probe out-of-process and only auto-select
-        # Aravis when a camera is actually connected (else fall back to the sim).
-        try:
-            from ..camera.aravis_proc import count_devices
-
-            return count_devices() > 0
-        except Exception:
-            return False
 
     if choice == "hikrobot" or (choice == "auto" and hik_available()):
         def hik_factory(camera_id, settings, recipe):
@@ -90,26 +80,6 @@ def _make_camera_factory():
 
         return hik_factory, False
 
-    if choice == "aravis" or (choice == "auto" and aravis_available()):
-        def aravis_factory(camera_id, settings, recipe):
-            # out-of-process worker (reliable on macOS); the in-venv binding
-            # segfaults, so we read frames from a brew-python worker subprocess.
-            from ..camera.aravis_proc import AravisProcessCamera
-            from ..camera.settings_store import load_settings
-
-            settings = settings or load_settings(camera_id)
-            dev = _hik_device_for(camera_id)  # same id->index/serial mapping
-            kwargs = {"device_id": dev["serial"]} if "serial" in dev else {
-                "device_index": dev.get("device_index", 0)
-            }
-            timeout = int(os.environ.get("VIS_GRAB_TIMEOUT_MS", "0") or 0)
-            if timeout:
-                kwargs["grab_timeout_ms"] = timeout
-            camera = AravisProcessCamera(camera_id, settings=settings, **kwargs)
-            camera.open()
-            return camera
-
-        return aravis_factory, False
 
     cti = os.environ.get("VIS_GENTL_CTI")
     if choice == "gige" or (choice == "auto" and cti):

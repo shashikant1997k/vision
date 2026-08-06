@@ -43,7 +43,7 @@ with the app's GenTL/Harvester driver:
 3. Network the camera: a wired Gigabit NIC; set it to a static IP on the
    camera's subnet (the camera is at `192.168.60.151`, so the PC e.g.
    `192.168.60.10 / 255.255.255.0`). Use Baumer's IP-config tool or
-   `arv-tool`/the camera webpage if needed.
+   the vendor IP configurator or the camera's web page if needed.
 4. Run the app pointed at the producer:
    ```powershell
    set VIS_CAMERA=gige
@@ -54,7 +54,7 @@ with the app's GenTL/Harvester driver:
 Alternatives:
 - **Hikrobot MVS** (if you also use Hikrobot cameras): install MVS, set
   `VIS_MVS_PYTHON` to its Python bindings dir, `set VIS_CAMERA=hikrobot`.
-- **Aravis for Windows** also works (`VIS_CAMERA=aravis`) but the GenTL producer
+- The GenTL producer
   is the smoother Windows route for the Baumer.
 
 ## 4. Camera settings in the app

@@ -8,6 +8,18 @@ from .device import CameraDevice, CameraInfo
 from .settings import CameraSettings, TriggerMode
 
 
+def _gige_setting(env: str, default: int) -> int:
+    """A GigE tuning value from the site config (exported to the environment by
+    AppConfig.apply_environment). Falls back to `default` when unset or junk."""
+    import os
+
+    raw = os.environ.get(env, "").strip()
+    try:
+        return int(raw) if raw else default
+    except ValueError:
+        return default
+
+
 def _try_set(node_map, name: str, value) -> None:
     """Set a GenICam feature node if the camera exposes it (cameras vary)."""
     try:
@@ -147,9 +159,19 @@ class HarvesterCamera(CameraDevice):
                 self._acquirer.stop()
             except Exception:
                 pass
-        # Keep the stream packet size within the NIC MTU (1500). A camera left
-        # with a jumbo default streams nothing on a non-jumbo NIC.
-        _try_set(node_map, "GevSCPSPacketSize", 1500)
+        # GigE link tuning — site-configurable (config `camera.packet_size` /
+        # `camera.packet_delay`, or VIS_GIGE_PACKET_SIZE / VIS_GIGE_PACKET_DELAY)
+        # so a plant can cure packet loss without a new build.
+        #
+        # Default 1500: a camera left on a jumbo packet size streams NOTHING on a
+        # NIC that cannot pass jumbo frames, which is the single most common
+        # "the camera is connected but there is no image" cause. Raise it only
+        # when the whole path (NIC, switch, cable) is known to support it.
+        _try_set(node_map, "GevSCPSPacketSize", _gige_setting("VIS_GIGE_PACKET_SIZE", 1500))
+        # Inter-packet delay: the standard cure for a host that cannot keep up.
+        delay = _gige_setting("VIS_GIGE_PACKET_DELAY", 0)
+        if delay:
+            _try_set(node_map, "GevSCPD", delay)
         _try_set(node_map, "ExposureTime", float(s.exposure_us))
         _try_set(node_map, "Gain", float(s.gain_db))
         if getattr(s, "black_level", 0):

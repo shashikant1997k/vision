@@ -116,6 +116,12 @@ class AravisProcessCamera(CameraDevice):
             "--source", s.trigger.source or "Line0",
             "--acq-mode", self._acq_mode,
         ]
+        # GigE link tuning from the site config (0 = leave to auto-negotiation)
+        for env, flag in (("VIS_GIGE_PACKET_SIZE", "--packet-size"),
+                          ("VIS_GIGE_PACKET_DELAY", "--packet-delay")):
+            value = os.environ.get(env, "").strip()
+            if value.isdigit() and int(value):
+                cmd += [flag, value]
         if self.device_id:
             cmd += ["--device-id", self.device_id]
         else:

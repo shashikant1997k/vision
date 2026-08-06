@@ -20,6 +20,15 @@ import numpy as np
 INP = 640
 
 
+def _env_float(name: str, default: float) -> float:
+    """Detector thresholds are site-tunable without a rebuild (see config
+    'ocr.detector_conf' / 'ocr.detector_iou')."""
+    try:
+        return float(os.environ.get(name, "") or default)
+    except ValueError:
+        return default
+
+
 def _candidate_paths() -> list[Path]:
     paths = []
     env = os.environ.get("VIS_DET_MODEL")
@@ -109,12 +118,15 @@ class LineDetector:
             self._input = sess.get_inputs()[0].name
             self._sess = sess
 
-    def detect_lines(self, image, conf: float = 0.4, iou: float = 0.45) -> list[dict]:
+    def detect_lines(self, image, conf: float | None = None, iou: float | None = None) -> list[dict]:
         """Full-detail detection. Returns dicts sorted top-to-bottom:
         {x, y, w, h, score, angle, cx, cy, rw, rh} where (x,y,w,h) is the
         axis-aligned bounding box and (cx,cy,rw,rh,angle) the rotated box
         (angle in radians; 0 for the axis-aligned v1 model)."""
         import cv2
+
+        conf = _env_float("VIS_DET_CONF", 0.4) if conf is None else conf
+        iou = _env_float("VIS_DET_IOU", 0.45) if iou is None else iou
 
         self._ensure()
         arr = np.asarray(image)
@@ -161,7 +173,7 @@ class LineDetector:
         res.sort(key=lambda b: b["y"])
         return res
 
-    def detect(self, image, conf: float = 0.4, iou: float = 0.45) -> list[tuple]:
+    def detect(self, image, conf: float | None = None, iou: float | None = None) -> list[tuple]:
         """Compatibility API: [(x,y,w,h,score)] axis-aligned, top-to-bottom."""
         return [(d["x"], d["y"], d["w"], d["h"], d["score"])
                 for d in self.detect_lines(image, conf, iou)]

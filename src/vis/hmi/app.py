@@ -38,6 +38,10 @@ def _hik_device_for(camera_id: str) -> dict:
             cid, _, serial = entry.partition("=")
             if cid.strip() == camera_id:
                 return {"serial": serial.strip()}
+    # a single explicitly configured camera wins when there is no per-camera map
+    explicit = os.environ.get("VIS_CAMERA_DEVICE_ID", "").strip()
+    if explicit:
+        return {"serial": explicit}
     digits = re.findall(r"(\d+)$", camera_id)
     return {"device_index": max(0, int(digits[0]) - 1) if digits else 0}
 
@@ -98,6 +102,9 @@ def _make_camera_factory():
             kwargs = {"device_id": dev["serial"]} if "serial" in dev else {
                 "device_index": dev.get("device_index", 0)
             }
+            timeout = int(os.environ.get("VIS_GRAB_TIMEOUT_MS", "0") or 0)
+            if timeout:
+                kwargs["grab_timeout_ms"] = timeout
             camera = AravisProcessCamera(camera_id, settings=settings, **kwargs)
             camera.open()
             return camera

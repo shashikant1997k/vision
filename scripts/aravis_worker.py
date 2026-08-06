@@ -38,6 +38,10 @@ def main() -> int:
     p.add_argument("--source", default="Line0")
     p.add_argument("--region", default="")                    # "x,y,w,h"
     p.add_argument("--buffers", type=int, default=8)
+    # GigE link tuning — site-configurable (config camera.packet_size /
+    # camera.packet_delay). 0 means "leave it to auto-negotiation".
+    p.add_argument("--packet-size", type=int, default=0)   # GevSCPSPacketSize
+    p.add_argument("--packet-delay", type=int, default=0)  # GevSCPD, cures packet loss
     p.add_argument("--acq-mode", default="oneshot", choices=("oneshot", "stream"),
                    help="oneshot: reliable per-frame acquisition (macOS default); "
                         "stream: persistent continuous stream (fast, line-PC)")
@@ -98,7 +102,14 @@ def main() -> int:
     _safe(lambda: cam.set_exposure_time(args.exposure))
     _safe(lambda: cam.set_gain_auto(Aravis.Auto.OFF))
     _safe(lambda: cam.set_gain(args.gain))
-    _safe(lambda: cam.gv_auto_packet_size())  # negotiate a safe packet size for the link
+    if args.packet_size:
+        # an explicit size beats auto-negotiation when the NIC/adapter cannot
+        # pass jumbo frames (1500 is the safe value for USB-Ethernet adapters)
+        _safe(lambda: cam.gv_set_packet_size(args.packet_size))
+    else:
+        _safe(lambda: cam.gv_auto_packet_size())  # negotiate a safe size for the link
+    if args.packet_delay:
+        _safe(lambda: cam.set_integer("GevSCPD", args.packet_delay))
     if args.fps:
         _safe(lambda: cam.set_frame_rate(args.fps))
     if args.region:

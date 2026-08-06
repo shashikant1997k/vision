@@ -33,9 +33,25 @@ DEFAULTS: dict = {
     "report_dir": "",            # blank -> <data dir>/reports
     "station": "",               # station name (blank = single default camera)
     "camera": {
-        "source": "",            # gige | hikrobot | aravis | sim | "" (auto)
+        "source": "",            # gige | hikrobot | aravis | file | sim | "" (auto)
         "gentl_cti": "",         # path to the GenTL producer (.cti) for gige
-        "index": 0,              # which discovered camera
+        "index": 0,              # which discovered camera (when no device_id)
+        "device_id": "",         # EXACT camera: serial / Aravis device id. Survives
+                                 # re-discovery order, so prefer it over index.
+        "map": "",               # multi-camera: "cam1=SERIAL1,cam2=SERIAL2" or
+                                 # "cam1:0,cam2:1" (indexes)
+        "file_dir": "",          # image folder for source=file
+        "grab_timeout_ms": 0,    # 0 = backend default (2000)
+        "packet_size": 0,        # GigE GevSCPSPacketSize; 0 = leave as the camera has it.
+                                 # Set 1500 when the NIC/adapter cannot pass jumbo frames.
+        "packet_delay": 0,       # GigE GevSCPD inter-packet delay; raise to cure packet loss
+    },
+    "ocr": {
+        "reader": "",            # vis_ocr (trained model) | builtin | "" (default)
+        "model": "",             # explicit .onnx path; blank = search the usual places
+        "detector_conf": 0.4,    # text-line detector confidence threshold
+        "detector_iou": 0.45,    # detector NMS IoU
+        "detector_fallback": True,  # allow the slow detector rescue on a weak read
     },
     "line": {
         "alarm_consecutive_rejects": 5,   # stop a production batch after N rejects in a row
@@ -118,6 +134,22 @@ class AppConfig:
     def image_write_analysis(self) -> bool:
         return bool(self._d.get("images", {}).get("write_analysis", True))
 
+    def camera_device_id(self) -> str:
+        """Exact camera to open (serial / Aravis device id); blank = use index."""
+        return os.environ.get("VIS_CAMERA_DEVICE_ID") or self._d.get("camera", {}).get("device_id", "")
+
+    def camera_grab_timeout_ms(self) -> int:
+        return int(os.environ.get("VIS_GRAB_TIMEOUT_MS")
+                   or self._d.get("camera", {}).get("grab_timeout_ms", 0) or 0)
+
+    def gige_packet_size(self) -> int:
+        return int(os.environ.get("VIS_GIGE_PACKET_SIZE")
+                   or self._d.get("camera", {}).get("packet_size", 0) or 0)
+
+    def gige_packet_delay(self) -> int:
+        return int(os.environ.get("VIS_GIGE_PACKET_DELAY")
+                   or self._d.get("camera", {}).get("packet_delay", 0) or 0)
+
     def apply_environment(self) -> None:
         """Push file settings into the environment so the rest of the app (which
         reads env vars) picks them up — without clobbering explicit env vars."""
@@ -129,3 +161,25 @@ class AppConfig:
             os.environ.setdefault("VIS_GENTL_CTI", str(cam["gentl_cti"]))
         if cam.get("index"):
             os.environ.setdefault("VIS_CAMERA_INDEX", str(cam["index"]))
+        if cam.get("device_id"):
+            os.environ.setdefault("VIS_CAMERA_DEVICE_ID", str(cam["device_id"]))
+        if cam.get("map"):
+            os.environ.setdefault("VIS_HIK_MAP", str(cam["map"]))
+        if cam.get("file_dir"):
+            os.environ.setdefault("VIS_FILE_DIR", str(cam["file_dir"]))
+        for key, env in (("grab_timeout_ms", "VIS_GRAB_TIMEOUT_MS"),
+                         ("packet_size", "VIS_GIGE_PACKET_SIZE"),
+                         ("packet_delay", "VIS_GIGE_PACKET_DELAY")):
+            if int(cam.get(key, 0) or 0):
+                os.environ.setdefault(env, str(int(cam[key])))
+        ocr = self._d.get("ocr", {})
+        if ocr.get("reader"):
+            os.environ.setdefault("VIS_TEXT_READER", str(ocr["reader"]))
+        if ocr.get("model"):
+            os.environ.setdefault("VIS_OCR_MODEL", str(ocr["model"]))
+        if "detector_conf" in ocr:
+            os.environ.setdefault("VIS_DET_CONF", str(float(ocr["detector_conf"])))
+        if "detector_iou" in ocr:
+            os.environ.setdefault("VIS_DET_IOU", str(float(ocr["detector_iou"])))
+        if not ocr.get("detector_fallback", True):
+            os.environ.setdefault("VIS_OCR_DETECTOR_FALLBACK", "0")

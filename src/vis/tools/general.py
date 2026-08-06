@@ -140,7 +140,21 @@ class TemplateMatchTool(InspectionTool):
     """Golden-template compare: pass when the ROI matches a registered reference
     (normalised cross-correlation) — catches missing/garbled artwork or print.
 
-    config: template (base64 grayscale); min_score 0..1 (default 0.6).
+    config:
+        template     base64 grayscale reference
+        min_score    0..1 (default 0.6)
+        angle_range  ± degrees to search (default 0 = no rotation search). Use
+                     this when the part can sit skewed on the conveyor: without
+                     it a good part rotated a few degrees scores low and is
+                     wrongly rejected.
+        angle_step   search granularity in degrees (default 2)
+        allow_inverted  accept reversed polarity — white-on-black artwork
+                     matches a black-on-white template (default False). NCC of an
+                     inverted image is the negative of the score, so this simply
+                     scores on the magnitude.
+
+    The best angle is reported in ``detail`` — a part that consistently matches
+    at +6° is telling you the fixture has drifted.
     """
 
     type = "template_match"
@@ -155,17 +169,50 @@ class TemplateMatchTool(InspectionTool):
         tpl = cv2.imdecode(arr, cv2.IMREAD_GRAYSCALE)
         roi = _gray(roi_image).astype(np.uint8)
         roi = cv2.resize(roi, (tpl.shape[1], tpl.shape[0]), interpolation=cv2.INTER_AREA)
-        a = roi.astype(np.float32) - roi.mean()
+
         b = tpl.astype(np.float32) - tpl.mean()
-        denom = float(np.sqrt((a * a).sum()) * np.sqrt((b * b).sum()))
-        score = float((a * b).sum() / denom) if denom else 0.0
+        b_norm = float(np.sqrt((b * b).sum()))
+        allow_inverted = bool(self.config.get("allow_inverted", False))
+
+        def ncc(candidate: np.ndarray) -> float:
+            a = candidate.astype(np.float32) - candidate.mean()
+            denom = float(np.sqrt((a * a).sum()) * b_norm)
+            if not denom:
+                return 0.0
+            value = float((a * b).sum() / denom)
+            return abs(value) if allow_inverted else value
+
+        score, best_angle = ncc(roi), 0.0
+        angle_range = abs(float(self.config.get("angle_range", 0) or 0))
+        if angle_range:
+            step = abs(float(self.config.get("angle_step", 2) or 2)) or 2.0
+            centre = (roi.shape[1] / 2.0, roi.shape[0] / 2.0)
+            angle = -angle_range
+            while angle <= angle_range + 1e-9:
+                if angle:  # 0 is already scored
+                    matrix = cv2.getRotationMatrix2D(centre, angle, 1.0)
+                    rotated = cv2.warpAffine(
+                        roi, matrix, (roi.shape[1], roi.shape[0]),
+                        flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE,
+                    )
+                    candidate = ncc(rotated)
+                    if candidate > score:
+                        score, best_angle = candidate, angle
+                angle += step
+
         min_score = float(self.config.get("min_score", 0.6))
+        detail = {"score": round(score, 3)}
+        if angle_range:
+            detail["angle"] = round(best_angle, 2)
+        measured = f"match {score:.2f}"
+        if angle_range and best_angle:
+            measured += f" at {best_angle:+.1f}°"
         return ToolResult(
             tool_id=self.tool_id,
             passed=score >= min_score,
-            measured_value=f"match {score:.2f}",
+            measured_value=measured,
             expected_value=f"≥ {min_score:.2f}",
             confidence=max(0.0, score),
             model_version="template-ncc",
-            detail={"score": round(score, 3)},
+            detail=detail,
         )

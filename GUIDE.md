@@ -112,7 +112,7 @@ One model per print technology — never one model for all fonts. Merging them
 enlarges the class space, adds cross-font confusions, slows inference, and means
 every retrain puts already-validated fonts back into revalidation.
 
-1. Train a model in `ocr-trainer` (see its `START_HERE.md`).
+1. Train a model in `ocr-trainer` (see its `GUIDE.md`).
 2. Ship `<name>.onnx` + `<name>.charset.txt` (+ `.meta.json` with `img_w`).
 3. Point a recipe's tool at it via `VIS_OCR_MODEL` / the reader seam.
 

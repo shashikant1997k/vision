@@ -49,7 +49,26 @@ def _keygen(args) -> int:
 
 
 def _issue(args) -> int:
-    keys = json.loads(Path(args.keyfile).read_text())
+    keyfile = Path(args.keyfile)
+    if not keyfile.is_file():
+        print(
+            f"signing key not found: {keyfile}\n"
+            "Create the vendor keypair once with:  vis-license keygen --out "
+            f"{keyfile}\n"
+            "(or pass --keyfile pointing at the existing one). Keep the private "
+            "key offline — it is what makes licenses unforgeable.",
+            file=sys.stderr,
+        )
+        return 2
+    try:
+        keys = json.loads(keyfile.read_text())
+    except Exception as exc:
+        print(f"cannot read the signing key {keyfile}: {exc}", file=sys.stderr)
+        return 2
+    if "private_key" not in keys:
+        print(f"{keyfile} has no 'private_key' — is it a vis-license keygen file?",
+              file=sys.stderr)
+        return 2
     packs = [p.strip() for p in args.packs.split(",") if p.strip()]
     unknown = [p for p in packs if p not in PACKS]
     if unknown:

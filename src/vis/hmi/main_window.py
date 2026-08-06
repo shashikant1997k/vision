@@ -379,8 +379,6 @@ class MainWindow(QMainWindow):
         self._sidebar_toggle.clicked.connect(self._toggle_sidebar)
         title = QLabel("Vision Inspection")
         title.setStyleSheet("font-size:16px; font-weight:600")
-        user_lbl = QLabel(username)
-        user_lbl.setStyleSheet("color:#778")
         header = QHBoxLayout()
         header.setContentsMargins(4, 2, 6, 2)
         header.addWidget(self._sidebar_toggle)
@@ -389,14 +387,47 @@ class MainWindow(QMainWindow):
         header.addSpacing(18)
         header.addWidget(self._cam_status, 1)
         header.addWidget(self._cam_refresh)
-        header.addSpacing(12)
-        header.addWidget(user_lbl)
         header_widget = QWidget()
         header_widget.setObjectName("headerBar")
         header_widget.setLayout(header)
         header_widget.setStyleSheet(
             "#headerBar{border-bottom:1px solid rgba(128,128,128,0.3)}"
         )
+
+        # --- persistent context bar -------------------------------------
+        # What is running, and who is running it — visible on EVERY screen,
+        # not just the live page. Operators (and auditors looking over their
+        # shoulder) can answer "which batch, which product, which user" at a
+        # glance from anywhere in the app; the content area is a stack, so
+        # without this the context disappears the moment you open Settings.
+        self._ctx_batch = QLabel("—")
+        self._ctx_product = QLabel("—")
+        self._ctx_user = QLabel(username or "—")
+        self._ctx_role = QLabel(self._role_name() or "—")
+        context = QHBoxLayout()
+        context.setContentsMargins(10, 3, 10, 3)
+        context.setSpacing(6)
+        for caption, value, stretch in (
+            ("Batch", self._ctx_batch, 0),
+            ("Product", self._ctx_product, 1),
+            ("User", self._ctx_user, 0),
+            ("Role", self._ctx_role, 0),
+        ):
+            cap = QLabel(f"{caption}:")
+            cap.setStyleSheet("color:#8a93a0; font-size:11px")
+            value.setStyleSheet("font-weight:600")
+            value.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            context.addWidget(cap)
+            context.addWidget(value, stretch)
+            context.addSpacing(14 if stretch else 20)
+        self._context_bar = QWidget()
+        self._context_bar.setObjectName("contextBar")
+        self._context_bar.setLayout(context)
+        self._context_bar.setStyleSheet(
+            "#contextBar{background:rgba(128,128,128,0.08);"
+            "border-bottom:1px solid rgba(128,128,128,0.25)}"
+        )
+        self._refresh_context_bar()
 
         # the camera feed vs. info panel split is draggable (resizable feed)
         from PySide6.QtWidgets import QSplitter, QStackedWidget
@@ -430,6 +461,7 @@ class MainWindow(QMainWindow):
         root = QVBoxLayout()
         root.setContentsMargins(8, 6, 8, 4)
         root.addWidget(header_widget, 0)
+        root.addWidget(self._context_bar, 0)
         root.addWidget(body_widget, 1)
         central = QWidget()
         central.setLayout(root)
@@ -500,6 +532,39 @@ class MainWindow(QMainWindow):
         """Show the test-recipe box only in test/setup mode (no batch selected)."""
         if hasattr(self, "_test_box"):
             self._test_box.setVisible(self._batch_combo.currentData() is None)
+        self._refresh_context_bar()
+
+    # ---- persistent context bar -------------------------------------------
+    def _role_name(self) -> str:
+        """The signed-in user's role, for the context bar."""
+        if self._sf is None or self._user_id is None:
+            return ""
+        try:
+            from ..db.users import UserService
+
+            with self._sf() as s:
+                user = UserService(s).get(self._user_id)
+                roles = getattr(user, "roles", None) or []
+                return ", ".join(r.name for r in roles) if roles else ""
+        except Exception:
+            return ""
+
+    def _refresh_context_bar(self) -> None:
+        """Keep 'what is running, and who is running it' truthful on every screen."""
+        if not hasattr(self, "_ctx_batch"):
+            return
+        batch = self._batch_combo.currentText() if self._batch_combo.currentData() else ""
+        if not batch:
+            typed = self._batch_no.text().strip() if hasattr(self, "_batch_no") else ""
+            batch = typed or ("TEST / SETUP" if self._batch_id is None else "")
+        self._ctx_batch.setText(batch or "—")
+        recipe = self._recipe_combo.currentText() if hasattr(self, "_recipe_combo") else ""
+        self._ctx_product.setText(recipe or "—")
+        # a batch that is running is the operator's most important fact — make
+        # it read as live rather than as just another label
+        self._ctx_batch.setStyleSheet(
+            "font-weight:600; color:#1b8a4b" if self._batch_id is not None else "font-weight:600"
+        )
 
     def _reload_recipes(self) -> None:
         """Repopulate every camera's recipe selector from the DB (demo + approved)."""
@@ -575,6 +640,7 @@ class MainWindow(QMainWindow):
                 return
             self._classify_downtime()
             self._batch_id = info["id"]
+            self._refresh_context_bar()
             batch_no = info["batch_no"]
             bus.subscribe(
                 "inspection.result",
@@ -591,6 +657,7 @@ class MainWindow(QMainWindow):
                 return
             self._classify_downtime()
             self._batch_id = None
+            self._refresh_context_bar()
 
         # build one assignment per camera, each with its own selected recipe
         # (the primary recipe drives the batch; batch values apply to all cameras)
@@ -993,6 +1060,7 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"Batch #{released_id} released; report failed: {exc}")
         self._log_event("info", "batch", f"Batch #{released_id} released")
         self._batch_id = None
+        self._refresh_context_bar()
         self._close_batch.setEnabled(False)
 
     def stop(self) -> None:

@@ -3,6 +3,7 @@ from . import (  # noqa: F401  — import for side effect: registers built-in to
     general,
     ocr,
     ocv_font,
+    print_inspect,
     stub_ocv,
 )
 from .base import InspectionTool, ToolResult

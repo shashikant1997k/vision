@@ -38,7 +38,7 @@ def load_aravis():
         raise RuntimeError(
             "Aravis not found. On macOS: `brew install aravis pygobject3`, then "
             "ensure PyGObject is importable (pip install pygobject). See "
-            "docs/19-mac-gige-setup.md."
+            "docs/22-camera-setup.md."
         ) from exc
 
 

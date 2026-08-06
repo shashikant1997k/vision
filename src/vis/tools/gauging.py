@@ -29,7 +29,8 @@ def _profile(gray: np.ndarray, p0, p1, width: int = 9):
     """Averaged intensity profile along p0->p1 (bilinear sampling)."""
     import cv2
 
-    p0 = np.asarray(p0, np.float64); p1 = np.asarray(p1, np.float64)
+    p0 = np.asarray(p0, np.float64)
+    p1 = np.asarray(p1, np.float64)
     vec = p1 - p0
     length = float(np.hypot(*vec))
     n = max(2, int(round(length)))

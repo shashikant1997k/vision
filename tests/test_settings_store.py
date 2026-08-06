@@ -1,4 +1,3 @@
-import json
 
 from vis.camera.settings import CameraSettings, TriggerMode
 from vis.camera.settings_store import load_settings, path_for, save_settings

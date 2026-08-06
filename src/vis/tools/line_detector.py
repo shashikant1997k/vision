@@ -72,9 +72,12 @@ def _nms(boxes: np.ndarray, scores: np.ndarray, iou_thr: float) -> list[int]:
     while order.size > 0:
         i = order[0]
         keep.append(int(i))
-        xx1 = np.maximum(x1[i], x1[order[1:]]); yy1 = np.maximum(y1[i], y1[order[1:]])
-        xx2 = np.minimum(x2[i], x2[order[1:]]); yy2 = np.minimum(y2[i], y2[order[1:]])
-        w = np.maximum(0, xx2 - xx1); h = np.maximum(0, yy2 - yy1)
+        xx1 = np.maximum(x1[i], x1[order[1:]])
+        yy1 = np.maximum(y1[i], y1[order[1:]])
+        xx2 = np.minimum(x2[i], x2[order[1:]])
+        yy2 = np.minimum(y2[i], y2[order[1:]])
+        w = np.maximum(0, xx2 - xx1)
+        h = np.maximum(0, yy2 - yy1)
         inter = w * h
         iou = inter / (areas[i] + areas[order[1:]] - inter + 1e-9)
         order = order[1:][iou <= iou_thr]
@@ -137,8 +140,10 @@ class LineDetector:
         boxes = np.stack([cx - ew / 2, cy - eh / 2, cx + ew / 2, cy + eh / 2], 1)
         res = []
         for i in _nms(boxes, scores, iou):
-            x1 = max(0, min(W, (boxes[i, 0] - left) / r)); y1 = max(0, min(H, (boxes[i, 1] - top) / r))
-            x2 = max(0, min(W, (boxes[i, 2] - left) / r)); y2 = max(0, min(H, (boxes[i, 3] - top) / r))
+            x1 = max(0, min(W, (boxes[i, 0] - left) / r))
+            y1 = max(0, min(H, (boxes[i, 1] - top) / r))
+            x2 = max(0, min(W, (boxes[i, 2] - left) / r))
+            y2 = max(0, min(H, (boxes[i, 3] - top) / r))
             if x2 - x1 < 3 or y2 - y1 < 3:
                 continue
             a = float(ang[i])
@@ -176,7 +181,8 @@ class LineDetector:
         M = cv2.getRotationMatrix2D((line["cx"], line["cy"]), deg, 1.0)
         rot = cv2.warpAffine(arr, M, (arr.shape[1], arr.shape[0]),
                              flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
-        x0 = max(0, int(line["cx"] - rw / 2)); y0 = max(0, int(line["cy"] - rh / 2))
+        x0 = max(0, int(line["cx"] - rw / 2))
+        y0 = max(0, int(line["cy"] - rh / 2))
         x1 = min(arr.shape[1], int(line["cx"] + rw / 2))
         y1 = min(arr.shape[0], int(line["cy"] + rh / 2))
         return rot[y0:y1, x0:x1]

@@ -17,12 +17,29 @@ This product targets the **missing middle**: modern, explainable AI tooling **wi
 
 ## Status
 
-**Working application.** The full single-station system is implemented and tested
-(140+ automated tests, lint-clean): camera acquisition, a direct-manipulation
-teach screen, a live multi-camera run with pass/fail + reject I/O, batch
-management with electronic signatures and reports, and an append-only audit
-trail. The OCR/OCV *reading* sits behind a provider seam so a licensed engine can
-be dropped in. See [`docs/`](docs/) for the design record.
+**Working application, 516 automated tests green.** Camera acquisition, a
+direct-manipulation teach screen, live multi-camera running with pass/fail and
+reject I/O, batch management with electronic signatures and reports, an
+append-only audit trail, image archiving with per-reject analysis, and a
+licensing layer (signed licenses, capability packs, encrypted models).
+
+Text reading uses our own trained models — a YOLO line detector plus an SVTR/CTC
+recogniser — reaching **97.9% field accuracy on real blisters with
+grammar-constrained decoding** (38.5% greedy; always state the decoding mode).
+
+### Start here
+
+| Document | For |
+|---|---|
+| **[GUIDE.md](GUIDE.md)** | how the application works, end to end |
+| **[CONTINUE_HERE.md](CONTINUE_HERE.md)** | picking the project up on another PC / in a new session |
+| [docs/22-camera-setup.md](docs/22-camera-setup.md) | cameras, networking, and why macOS can't run one |
+| [docs/](docs/) | architecture, OCR/OCV engine, compliance, decision log |
+
+```bash
+python3 -m venv .venv && .venv/bin/pip install -e ".[engine,ocr,dev]"
+VIS_CAMERA=file VIS_TEXT_READER=vis_ocr .venv/bin/vis-hmi   # full app, no camera
+```
 
 ## What's built
 

@@ -102,7 +102,7 @@ class AravisProcessCamera(CameraDevice):
             raise RuntimeError(
                 "No Aravis-capable Python found. Install Aravis (brew install aravis "
                 "pygobject3) and/or set VIS_ARAVIS_PYTHON to that interpreter. "
-                "See docs/19-mac-gige-setup.md."
+                ""
             )
         s = self.settings
         trig = s.trigger.mode

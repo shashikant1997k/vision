@@ -67,7 +67,7 @@ Alternatives:
 
 ## 5. Continuing the assistant on Windows
 A fresh Claude Code session here won't have the Mac session's memory — point it
-at this repo: it reads `PROJECT_STATE.md` + `docs/`. Suggested opener:
-> "Read PROJECT_STATE.md and docs/, run the tests, then help me get live frames
+at this repo: it reads `CONTINUE_HERE.md` + `docs/`. Suggested opener:
+> "Read CONTINUE_HERE.md and docs/, run the tests, then help me get live frames
 >  from the Baumer VCXG-24C via the Baumer GenTL producer and teach the Sun
 >  Pharma carton recipe."

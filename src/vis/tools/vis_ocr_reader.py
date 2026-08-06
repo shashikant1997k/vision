@@ -152,7 +152,20 @@ class VisOcrReader:
         x = _preprocess(image, self._img_w)
         out = self._sess.run(None, {self._input: x})[0]  # (T, 1, C)
         logits = np.asarray(out)[:, 0, :]
-        return self._decode(logits)
+        return self.read_logits(logits, config)
+
+    def read_logits(self, logits: np.ndarray, config=None) -> tuple[str, float]:
+        """Decode one field's logits, constrained by the tool config when it
+        gives us a grammar (regex ``pattern`` or an exact ``expected`` value).
+        A field's grammar makes most single-character confusions inexpressible,
+        which is where the accuracy comes from — see constrained_decode."""
+        from .constrained_decode import decode, pattern_for_field
+
+        grammar = pattern_for_field(config)
+        charset = (config or {}).get("charset") or None
+        if grammar is None and not charset:
+            return self._decode(logits)          # greedy: nothing to constrain
+        return decode(logits, self._itos, pattern=grammar, charset=charset)
 
     # ---- OCV verification (calibrated CTC-forward scoring) -----------------
     def _calibration(self) -> dict:

@@ -348,6 +348,33 @@ class MainWindow(QMainWindow):
         info.addWidget(self._results_table, 1)
         info.addLayout(totals_row)
         info.addWidget(self._reasons)
+
+        # --- last reject, inline ------------------------------------------
+        # When the line rejects something the operator's first question is
+        # "what did it look like?". Answering it here — on the screen they are
+        # already watching — beats making them navigate to Reports and lose
+        # sight of the running line.
+        self._last_reject_head = _section_label("LAST REJECT")
+        self._last_reject_head.setVisible(False)
+        self._last_reject_img = QLabel()
+        self._last_reject_img.setFixedHeight(96)
+        self._last_reject_img.setAlignment(Qt.AlignCenter)
+        self._last_reject_img.setCursor(Qt.PointingHandCursor)
+        self._last_reject_img.setToolTip("Click to review all rejects")
+        self._last_reject_img.setStyleSheet(
+            "border:1px solid #c9534f; border-radius:6px; background:rgba(201,83,79,0.06)"
+        )
+        self._last_reject_img.mousePressEvent = lambda _e: self.open_reports()
+        self._last_reject_img.setVisible(False)
+        self._last_reject_txt = QLabel("")
+        self._last_reject_txt.setWordWrap(True)
+        self._last_reject_txt.setStyleSheet("color:#c9534f; font-size:11px")
+        self._last_reject_txt.setVisible(False)
+        self._last_reject_id = None
+        info.addWidget(self._last_reject_head)
+        info.addWidget(self._last_reject_img)
+        info.addWidget(self._last_reject_txt)
+
         info.addWidget(self._close_batch)
         info_widget = QWidget()
         info_widget.setLayout(info)
@@ -528,6 +555,68 @@ class MainWindow(QMainWindow):
         if hasattr(self, "_test_box"):
             self._test_box.setVisible(self._batch_combo.currentData() is None)
         self._refresh_context_bar()
+
+    # ---- last reject, inline on the live screen ---------------------------
+    def _update_last_reject(self) -> None:
+        """Show the newest rejected frame and why it failed, next to the live
+        feed. Only redraws when the reject actually changes — this runs on every
+        refresh tick."""
+        if not hasattr(self, "_last_reject_img"):
+            return
+        items = self._failed_log.items()
+        if not items:
+            for w in (self._last_reject_head, self._last_reject_img, self._last_reject_txt):
+                w.setVisible(False)
+            self._last_reject_id = None
+            return
+        latest = items[-1]
+        key = (latest.get("camera_id"), latest.get("frame_id"))
+        if key == self._last_reject_id:
+            return
+        self._last_reject_id = key
+        try:
+            recipe = self._cam_recipes.get(latest.get("camera_id"), self._recipe)
+            annotated = draw_overlay(latest["image"], recipe, latest["results"])
+            pixmap = numpy_to_qpixmap(annotated)
+            self._last_reject_img.setPixmap(
+                pixmap.scaled(self._last_reject_img.width(), self._last_reject_img.height(),
+                              Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            )
+        except Exception:
+            self._last_reject_img.setText("(image unavailable)")
+        self._last_reject_txt.setText(
+            f"Frame {latest.get('frame_id', '?')} — {self._reject_reason(latest)}"
+        )
+        for w in (self._last_reject_head, self._last_reject_img, self._last_reject_txt):
+            w.setVisible(True)
+
+    @staticmethod
+    def _reject_reason(entry: dict, limit: int = 2) -> str:
+        """Why this frame was rejected, in the operator's terms.
+
+        A region result carries the tool results underneath it, so 'failed' is
+        never good enough — name the tool that failed and, where we have it,
+        what it read versus what it expected."""
+        parts: list[str] = []
+        for region in entry.get("results", []):
+            if getattr(region, "passed", True):
+                continue
+            for tool in getattr(region, "tool_results", []) or []:
+                if getattr(tool, "passed", True):
+                    continue
+                name = getattr(tool, "tool_id", "") or "inspection"
+                measured = getattr(tool, "measured_value", None)
+                expected = getattr(tool, "expected_value", None)
+                if measured and expected:
+                    parts.append(f"{name}: read “{measured}”, expected “{expected}”")
+                elif measured:
+                    parts.append(f"{name}: read “{measured}”")
+                else:
+                    parts.append(name)
+        if not parts:
+            return "failed"
+        shown = "; ".join(parts[:limit])
+        return shown + (f" (+{len(parts) - limit} more)" if len(parts) > limit else "")
 
     # ---- persistent context bar -------------------------------------------
     def _role_name(self) -> str:
@@ -1741,6 +1830,7 @@ class MainWindow(QMainWindow):
             self._reasons.setText("")
         self._reports_btn.setText(f"Reports… ({len(self._failed_log)} rejects)"
                                  if self._failed_log else "Reports…")
+        self._update_last_reject()
 
         # GMP line-stop: N consecutive rejects means a systematic failure (e.g.
         # the coder stopped printing) — stop the line and alarm, don't keep

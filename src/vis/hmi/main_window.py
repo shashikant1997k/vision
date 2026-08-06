@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import logging
+from pathlib import Path
+
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (
@@ -556,6 +559,45 @@ class MainWindow(QMainWindow):
             self._test_box.setVisible(self._batch_combo.currentData() is None)
         self._refresh_context_bar()
 
+    # ---- image archiving --------------------------------------------------
+    def _make_archiver(self):
+        """Archive inspected frames per the site's retention policy.
+
+        Returns the runner's ``on_frame`` hook, or None when archiving is off /
+        unavailable. Images land under ``<archive>/pass`` and ``<archive>/reject``
+        with a JSON analysis beside each reject, so "why was this rejected?" is
+        answerable from the folder alone, months later."""
+        if self._sf is None:
+            return None
+        try:
+            from ..config import AppConfig
+            from ..runtime.archive import FrameArchiver
+
+            config = AppConfig.load()
+            policy = config.image_policy()
+            if policy == "none":
+                self._archiver = None
+                return None
+            root = config.image_dir()
+            # one folder per batch keeps a plant's archive navigable, and makes
+            # "give me batch X's images" a copy rather than a query
+            if self._batch_id is not None:
+                root = str(Path(root) / f"batch_{self._batch_id}")
+            self._archiver = FrameArchiver(
+                self._sf, root,
+                batch_id=self._batch_id,
+                policy=policy,
+                separate_folders=config.image_separate_folders(),
+                write_analysis=config.image_write_analysis(),
+            )
+            self._log_event("info", "run", f"Image archiving: {policy} → {root}")
+            return self._archiver.on_frame
+        except Exception:
+            # never let archiving setup stop a batch from running
+            logging.getLogger(__name__).exception("could not start image archiving")
+            self._archiver = None
+            return None
+
     # ---- last reject, inline on the live screen ---------------------------
     def _update_last_reject(self) -> None:
         """Show the newest rejected frame and why it failed, next to the live
@@ -813,6 +855,7 @@ class MainWindow(QMainWindow):
             live_view=self._live,
             reject_handler=reject,
             failed_log=self._failed_log,
+            on_frame=self._make_archiver(),
         )
         self._runner.start()
         self._timer.start()

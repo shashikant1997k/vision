@@ -41,6 +41,12 @@ DEFAULTS: dict = {
         "alarm_consecutive_rejects": 5,   # stop a production batch after N rejects in a row
         "require_challenge_hours": 0,     # require a passing challenge test within N h (0 = off)
     },
+    "images": {
+        "policy": "fails",          # none | fails | all — which frames to archive
+        "dir": "",                  # blank -> <data dir>/images
+        "separate_folders": True,   # keep passes and rejects in pass/ and reject/
+        "write_analysis": True,     # a .json beside each reject saying why
+    },
     "io": {
         "backend": "",           # "" (simulated) | modbus
         "host": "",
@@ -95,6 +101,22 @@ class AppConfig:
 
     def require_challenge_hours(self) -> int:
         return int(self._d.get("line", {}).get("require_challenge_hours", 0) or 0)
+
+    def image_policy(self) -> str:
+        """Which frames to archive: none | fails | all."""
+        return str(os.environ.get("VIS_IMAGE_POLICY")
+                   or self._d.get("images", {}).get("policy", "fails"))
+
+    def image_dir(self) -> str:
+        return (os.environ.get("VIS_IMAGE_DIR")
+                or self._d.get("images", {}).get("dir")
+                or str(data_dir() / "images"))
+
+    def image_separate_folders(self) -> bool:
+        return bool(self._d.get("images", {}).get("separate_folders", True))
+
+    def image_write_analysis(self) -> bool:
+        return bool(self._d.get("images", {}).get("write_analysis", True))
 
     def apply_environment(self) -> None:
         """Push file settings into the environment so the rest of the app (which

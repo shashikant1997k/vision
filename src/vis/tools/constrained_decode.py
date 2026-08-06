@@ -404,6 +404,11 @@ def decode(
         return "", 0.0
     prefix, score, _ = max(scored, key=lambda s: s[1])
     conf = float(np.exp(score / max(len(prefix), 1)))
+    if nfa is None:
+        # Same padding artifact the greedy decoder strips. Only safe without a
+        # grammar: a constrained read must keep satisfying the grammar it was
+        # decoded under, which may itself specify surrounding spaces.
+        prefix = prefix.strip()
     return prefix, min(conf, 1.0)
 
 

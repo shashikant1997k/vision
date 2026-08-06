@@ -143,7 +143,12 @@ class VisOcrReader:
                 chars.append(self._itos[i])
                 confs.append(float(probs[t, i]))
             prev = i
-        text = "".join(chars)
+        # Leading/trailing whitespace is a CTC artifact of the white padding we
+        # add to reach the model's fixed width — never part of the printed
+        # value. Left in, it makes an otherwise perfect read fail an exact
+        # comparison ("B.No.TEST12345 " != "B.No.TEST12345"), and it lands in
+        # the audit record and the archive analysis as if it were real.
+        text = "".join(chars).strip()
         conf = float(np.mean(confs)) if confs else 0.0
         return text, conf
 

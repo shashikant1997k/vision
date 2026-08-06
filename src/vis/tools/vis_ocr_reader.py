@@ -50,9 +50,13 @@ def _candidate_model_paths() -> list[Path]:
 
 
 def _find_model() -> Path | None:
+    """First model present — plain ``.onnx`` or its licensed ``.onnx.enc``."""
+    from ..licensing import resolve_model_path
+
     for p in _candidate_model_paths():
-        if p.is_file():
-            return p
+        found = resolve_model_path(p)
+        if found is not None:
+            return found
     return None
 
 
@@ -110,18 +114,21 @@ class VisOcrReader:
                 return
             import onnxruntime as ort
 
+            from ..licensing import load_model_bytes
             from .model_integrity import model_meta, verify_model
 
             # integrity first: refuse corrupted/swapped model files (GMP)
             self.fingerprint = verify_model(self.model_path, what="vis_ocr model")
             self._img_w = int(model_meta(self.model_path).get("img_w", IMG_W))
             # per-model sidecar (<model>.charset.txt) wins, else shared charset.txt
-            per = self.model_path.with_name(self.model_path.stem + ".charset.txt")
+            stem = self.model_path.stem.removesuffix(".onnx")  # …onnx.enc -> …
+            per = self.model_path.with_name(stem + ".charset.txt")
             charset_path = per if per.is_file() else self.model_path.with_name("charset.txt")
             charset = charset_path.read_text(encoding="utf-8").strip("\n")
             self._itos = ["<blank>"] + list(charset)
+            # licensed models ship encrypted; decrypt in memory only
             sess = ort.InferenceSession(
-                str(self.model_path), providers=["CPUExecutionProvider"]
+                load_model_bytes(self.model_path), providers=["CPUExecutionProvider"]
             )
             self._input = sess.get_inputs()[0].name
             self._sess = sess  # publish last, after everything is ready

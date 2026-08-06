@@ -42,9 +42,13 @@ def _candidate_paths() -> list[Path]:
 
 
 def _find_model() -> Path | None:
+    """First model present — plain ``.onnx`` or its licensed ``.onnx.enc``."""
+    from ..licensing import resolve_model_path
+
     for p in _candidate_paths():
-        if p.is_file():
-            return p
+        found = resolve_model_path(p)
+        if found is not None:
+            return found
     return None
 
 
@@ -92,11 +96,12 @@ class LineDetector:
                 return
             import onnxruntime as ort
 
+            from ..licensing import load_model_bytes
             from .model_integrity import verify_model
 
             self.fingerprint = verify_model(self.model_path, what="line-detector model")
             sess = ort.InferenceSession(
-                str(self.model_path), providers=["CPUExecutionProvider"]
+                load_model_bytes(self.model_path), providers=["CPUExecutionProvider"]
             )
             self._input = sess.get_inputs()[0].name
             self._sess = sess

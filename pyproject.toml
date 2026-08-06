@@ -4,7 +4,7 @@ version = "0.0.1"
 description = "Pharma inline print & code verification system"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = ["numpy>=1.24", "SQLAlchemy>=2.0"]
+dependencies = ["numpy>=1.24", "SQLAlchemy>=2.0", "cryptography>=42.0"]
 
 # Optional heavy deps are not needed for the walking skeleton.
 [project.optional-dependencies]
@@ -24,6 +24,7 @@ vis-hmi = "vis.hmi.app:main"
 vis-emulate = "vis.runtime.emulate:main"
 vis-backup = "vis.db.backup:main"
 vis-ocrbench = "vis.runtime.ocr_bench:main"
+vis-license = "vis.licensing.issue:main"
 
 [build-system]
 requires = ["setuptools>=68"]

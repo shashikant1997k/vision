@@ -8,11 +8,19 @@ reject I/O, stats, and reports.
 from __future__ import annotations
 
 import base64
+import logging
 
 import numpy as np
 
 from .base import InspectionTool, ToolResult
 from .registry import register
+
+_log = logging.getLogger(__name__)
+
+# Wrong artwork can reach ~0.7 NCC, so a threshold below that accepts the wrong
+# part. This is a safety floor for the untaught case, NOT a substitute for
+# teaching the threshold from real samples.
+DEFAULT_TEMPLATE_MIN_SCORE = 0.8
 
 
 def _gray(image) -> np.ndarray:
@@ -135,14 +143,70 @@ def register_template(image) -> str:
     return base64.b64encode(buf.tobytes()).decode("ascii")
 
 
+def suggest_min_score(template_b64: str, good_samples, bad_samples=(), **tool_config) -> dict:
+    """Derive a pass threshold from real samples instead of guessing.
+
+    Scores every good (and any bad) sample with the same settings the tool will
+    run with, then places the threshold below the worst good sample with a small
+    margin — and, when bad samples are supplied, checks the two populations
+    actually separate. Returns the suggestion plus the evidence, so a validation
+    record can show *why* the threshold is what it is.
+
+        suggest_min_score(tpl, good_crops, bad_crops, angle_range=10)
+        -> {"min_score": 0.87, "good": {...}, "bad": {...}, "separated": True}
+    """
+    tool = TemplateMatchTool("suggest", {"template": template_b64, **tool_config})
+    good = [float(tool.inspect(img).detail["score"]) for img in good_samples]
+    bad = [float(tool.inspect(img).detail["score"]) for img in bad_samples]
+    if not good:
+        raise ValueError("at least one good sample is required to teach a threshold")
+    worst_good, best_bad = min(good), (max(bad) if bad else None)
+    if best_bad is None:
+        # No counter-examples: we can place a threshold under the good samples,
+        # but nothing here proves it rejects a bad part. Say so rather than
+        # implying the ROI was validated.
+        separated = None
+        warning = ("no bad samples given — the threshold fits the good parts but "
+                   "has not been shown to reject a wrong one. Teach with at least "
+                   "one known-bad sample.")
+        suggestion = worst_good - 0.05
+    elif best_bad < worst_good:
+        separated = True
+        warning = None
+        suggestion = (worst_good + best_bad) / 2.0   # sit between the populations
+    else:
+        separated = False
+        warning = ("good and bad samples OVERLAP — no threshold can separate them, "
+                   "so this ROI cannot be judged reliably by template match. If it "
+                   "contains text, verify it with an OCV/OCR tool instead.")
+        suggestion = worst_good - 0.05
+    return {
+        "min_score": round(max(0.0, min(1.0, suggestion)), 3),
+        "good": {"n": len(good), "min": round(worst_good, 3),
+                 "max": round(max(good), 3)},
+        "bad": {"n": len(bad), "max": round(best_bad, 3)} if bad else {"n": 0},
+        "separated": separated,
+        "warning": warning,
+    }
+
+
 @register
 class TemplateMatchTool(InspectionTool):
     """Golden-template compare: pass when the ROI matches a registered reference
     (normalised cross-correlation) — catches missing/garbled artwork or print.
 
+    **Use this for artwork, not for text.** Normalised cross-correlation is weak
+    at discriminating *characters*: on a real crop, completely wrong text still
+    scores around 0.7 where correct text scores ~1.0. Verifying printed values is
+    what the OCV/OCR tools are for — this tool answers "is the right artwork
+    present and intact?".
+
     config:
         template     base64 grayscale reference
-        min_score    0..1 (default 0.6)
+        min_score    0..1 (default 0.8). The old default of 0.6 sat below the
+                     score wrong artwork can reach, so it could accept the wrong
+                     part; teach the threshold from real samples rather than
+                     relying on any default.
         angle_range  ± degrees to search (default 0 = no rotation search). Use
                      this when the part can sit skewed on the conveyor: without
                      it a good part rotated a few degrees scores low and is
@@ -200,7 +264,20 @@ class TemplateMatchTool(InspectionTool):
                         score, best_angle = candidate, angle
                 angle += step
 
-        min_score = float(self.config.get("min_score", 0.6))
+        min_score = self.config.get("min_score")
+        if min_score is None:
+            # No taught threshold: warn once per tool. A default is a guess about
+            # the customer's print, and this one decides pass/fail.
+            min_score = DEFAULT_TEMPLATE_MIN_SCORE
+            if not getattr(self, "_warned_default_score", False):
+                self._warned_default_score = True
+                _log.warning(
+                    "template_match %s has no taught min_score — using the default "
+                    "%.2f. Teach it from real good/bad samples: the right threshold "
+                    "depends on your print and lighting.",
+                    self.tool_id, min_score,
+                )
+        min_score = float(min_score)
         detail = {"score": round(score, 3)}
         if angle_range:
             detail["angle"] = round(best_angle, 2)

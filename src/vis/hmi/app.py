@@ -138,8 +138,6 @@ def _make_camera_factory():
 
 
 def main() -> int:
-    import os
-    from pathlib import Path
 
     # Single site config file (DB, camera, station, paths, line params). Env
     # vars still win; the file is the persistent per-install setup.

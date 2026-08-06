@@ -52,8 +52,8 @@ def test_operator_sees_run_only_screen(tmp_path):
     # engineering/admin controls are hidden, not just permission-blocked
     for w in (win._teach, win._teach_files, win._import, win._settings, win._admin):
         assert w.isHidden()
-    # run controls remain
-    assert not win._start.isHidden() and not win._review.isHidden()
+    # run controls remain (rejects/records now live behind the Reports screen)
+    assert not win._start.isHidden() and not win._reports_btn.isHidden()
 
 
 def test_admin_sees_everything(tmp_path):

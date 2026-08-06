@@ -182,29 +182,25 @@ class MainWindow(QMainWindow):
         self._stop.setProperty("variant", "danger")
         self._teach = QPushButton("Teach…")
         self._teach_files = QPushButton("Teach on images…")
-        self._review = QPushButton("Review rejects…")
         self._import = QPushButton("Import recipe…")
         self._fonts = QPushButton("Fonts…")
         self._challenge = QPushButton("Challenge test…")
-        self._events_btn = QPushButton("Events…")
+        self._reports_btn = QPushButton("Reports…")
         self._admin = QPushButton("Admin…")
         self._settings = QPushButton("Settings…")  # tabbed: Camera · Comms · PLC · Station
         self._products_btn = QPushButton("Products…")
-        self._batches_btn = QPushButton("Batches…")
         self._stop.setEnabled(False)
         self._start.clicked.connect(self.start)
         self._stop.clicked.connect(self.stop)
         self._teach.clicked.connect(self.open_teach)
         self._teach_files.clicked.connect(self.open_teach_from_files)
-        self._review.clicked.connect(self.open_review)
         self._import.clicked.connect(self.import_recipe)
         self._fonts.clicked.connect(self.open_fonts)
         self._challenge.clicked.connect(self.open_challenge)
-        self._events_btn.clicked.connect(self.open_events)
+        self._reports_btn.clicked.connect(self.open_reports)
         self._admin.clicked.connect(self.open_admin)
         self._settings.clicked.connect(self.open_settings)
         self._products_btn.clicked.connect(self.open_products)
-        self._batches_btn.clicked.connect(self.open_batches)
 
         # role-gate the engineering/admin controls: operators get a clean
         # run-only screen (industry practice — not just backend permission errors)
@@ -213,7 +209,6 @@ class MainWindow(QMainWindow):
         for widget, perm in (
             (self._teach, Perm.RECIPE_CREATE),
             (self._products_btn, Perm.RECIPE_CREATE),
-            (self._batches_btn, Perm.BATCH_MANAGE),
             (self._edit_recipe_btn, Perm.RECIPE_CREATE),
             (self._teach_files, Perm.RECIPE_CREATE),
             (self._import, Perm.RECIPE_CREATE),
@@ -310,7 +305,7 @@ class MainWindow(QMainWindow):
         sidebar.addWidget(_section_label("RUN"))
         sidebar.addWidget(self._start)
         sidebar.addWidget(self._stop)
-        for w in (self._batches_btn, self._challenge, self._review, self._events_btn):
+        for w in (self._challenge, self._reports_btn):
             sidebar.addWidget(w)
         sidebar.addWidget(_section("BUILD RECIPE", build_btns))
         for w in build_btns:
@@ -952,6 +947,39 @@ class MainWindow(QMainWindow):
         from .events_window import EventsWindow
 
         self._show_panel(lambda: EventsWindow(self._sf, self))
+
+    def open_reports(self) -> None:
+        """Everything you look up after a run: batch records, the rejects that
+        were caught, the event log and the audit trail — one screen, tabs."""
+        from ..security.authz import Perm
+        from .reports_hub import ReportsHubWindow
+
+        tabs = []
+        if self._sf is not None:
+            from .batches_window import BatchOrdersWindow
+
+            tabs.append(("Batch orders", lambda: BatchOrdersWindow(
+                self._sf, self._user_id, on_changed=self._reload_open_batches, parent=self,
+            )))
+        if self._failed_log:
+            from .review_window import ReviewWindow
+
+            tabs.append((f"Rejects ({len(self._failed_log)})",
+                         lambda: ReviewWindow(self._failed_log, self._recipe, self)))
+        if self._sf is not None:
+            from .events_window import EventsWindow
+
+            tabs.append(("Events", lambda: EventsWindow(self._sf, self)))
+            if self._can(Perm.AUDIT_VIEW):
+                from .audit_review_window import AuditReviewWindow
+
+                tabs.append(("Audit trail", lambda: AuditReviewWindow(
+                    self._sf, self._user_id, parent=self,
+                )))
+        if not tabs:
+            self.statusBar().showMessage("No database — reports unavailable.")
+            return
+        self._show_panel(lambda: ReportsHubWindow(tabs, parent=self))
 
     def open_comms(self) -> None:
         if self._sf is None:
@@ -1711,7 +1739,8 @@ class MainWindow(QMainWindow):
             self._reasons.setText(f"Top reject reasons: {top}")
         else:
             self._reasons.setText("")
-        self._review.setText(f"Review rejects… ({len(self._failed_log)})")
+        self._reports_btn.setText(f"Reports… ({len(self._failed_log)} rejects)"
+                                 if self._failed_log else "Reports…")
 
         # GMP line-stop: N consecutive rejects means a systematic failure (e.g.
         # the coder stopped printing) — stop the line and alarm, don't keep

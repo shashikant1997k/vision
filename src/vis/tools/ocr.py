@@ -12,6 +12,7 @@ throughput optimisation.
 
 from __future__ import annotations
 
+import os
 import re
 import threading
 
@@ -241,6 +242,27 @@ def _metric(text: str, score: float) -> float:
     return len(text.replace(" ", "")) * max(score, 0.01)
 
 
+# Below this confidence a recognition-only read is not trustworthy on its own —
+# a collapsed run of identical glyphs ("00000" -> "0") lands here, scoring ~0.3
+# where a genuine read scores 0.8+. It is the trigger for the detector fallback.
+_WEAK_SCORE = 0.5
+
+
+def _detector_fallback_enabled() -> bool:
+    """The detector rescue is on unless a line disables it for cycle time."""
+    return os.environ.get("VIS_OCR_DETECTOR_FALLBACK", "1").strip() not in ("0", "false", "no")
+
+
+# Runs of 4+ identical characters are where recognition-only miscounts. Three
+# is left alone: it reads correctly and "000" appears in real prices (M.R.P
+# Rs. 000.00), so triggering there would cost 300 ms on genuine product text.
+_LONG_RUN = 4
+
+
+def _has_long_run(text: str, length: int = _LONG_RUN) -> bool:
+    return bool(re.search(r"(.)\1{" + str(length - 1) + r",}", text.replace(" ", "")))
+
+
 def _gray_base(image):
     """Padded, grayscale, upscaled base shared by every transform variant."""
     import cv2
@@ -338,12 +360,44 @@ def recognize(roi_image, accept=None) -> tuple[str, float]:
 
     # pure reading: keep a usable primary read; only if nothing was read fall back
     # to the cleanup/glare transforms (never override a real read).
-    if len(best[0].replace(" ", "")) >= 2:
+    if len(best[0].replace(" ", "")) >= 2 and best[1] >= _WEAK_SCORE:
+        if not _has_long_run(best[0]):
+            return best
+        # A run of identical glyphs is the one thing recognition-only gets
+        # confidently wrong: nothing in a smooth run tells it HOW MANY there
+        # are, so "MRP00000" comes back as "MRP0000" at a healthy 0.75. The
+        # detector boxes each glyph and counts them properly. It costs ~50x
+        # more, so it is spent only here — and no line of the customer's real
+        # coding text contains a run this long, so in production it never fires.
+        if _detector_fallback_enabled():
+            try:
+                t, s = _run_det_rec(engine, primary)
+            except Exception:
+                return best
+            if len(t.replace(" ", "")) > len(best[0].replace(" ", "")) and s >= _WEAK_SCORE:
+                return t, s
         return best
     for image in _extra_variants(roi_image):  # heavy fallbacks, built only now
         t, s = _run_rec_only(engine, image)
         if len(t.replace(" ", "")) >= 2 and _metric(t, s) > _metric(*best):
             best = (t, s)
+    if len(best[0].replace(" ", "")) >= 2 and best[1] >= _WEAK_SCORE:
+        return best
+
+    # Last resort: the DETECTOR. Recognition-only can collapse a run of
+    # identical glyphs — "00000" reads as "0" — because nothing in the crop
+    # tells the recogniser how many there are; the detector boxes each glyph
+    # separately and gets it right. It is 10-100x slower, so it runs ONLY here,
+    # where every recognition-only attempt was weak and we would otherwise
+    # return a wrong (and confidently short) value. Set VIS_OCR_DETECTOR_FALLBACK=0
+    # to forbid it on a line with a tight cycle-time budget.
+    if _detector_fallback_enabled():
+        try:
+            t, s = _run_det_rec(engine, primary)
+        except Exception:
+            return best
+        if len(t.replace(" ", "")) >= 2 and _metric(t, s) > _metric(*best):
+            return t, s
     return best
 
 

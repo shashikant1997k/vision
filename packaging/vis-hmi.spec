@@ -1,51 +1,106 @@
-# PyInstaller spec for the Qt desktop HMI (Windows build).
+# PyInstaller spec for the Windows line-PC build.
 #
-# Build (on Windows, in the project venv with [hmi] + licensed extras installed):
 #   pip install pyinstaller
-#   pyinstaller packaging/vis-hmi.spec
-#   -> dist/vis-hmi/vis-hmi.exe
+#   pyinstaller packaging/vis-hmi.spec --noconfirm
+#   -> dist/vis-hmi/            <- copy this WHOLE FOLDER to the line PC
 #
-# Notes / caveats:
-#   - rapidocr-onnxruntime bundles ONNX models as data files; collect them or the
-#     OCR tool will fail at runtime. We use collect_data_files for them below.
-#   - zxing-cpp (zxingcpp), onnxruntime, and PySide6 ship compiled extensions;
-#     PyInstaller's hooks usually handle them, but verify on the target machine.
-#   - The GenTL producer (.cti) is NOT bundled — it is installed separately and
-#     located via the VIS_GENTL_CTI env var (vendor licensing).
+# This is a ONEDIR build on purpose. The result is a folder containing
+# vis-hmi.exe plus every DLL and data file it needs — copy it to the machine and
+# run it; no Python, no pip, no internet on the line PC. It is also the right
+# choice for a validated installation: every file is visible and can be
+# checksummed for IQ, and startup is much faster than a onefile build (which
+# unpacks itself to a temp folder on every launch).
+#
+# What is deliberately NOT bundled:
+#   - the GenTL producer (.cti) — vendor-licensed, installed with the camera SDK
+#     and located at runtime via VIS_GENTL_CTI / the site config
+#   - the trained models — shipped per customer (and encrypted per licence by
+#     `vis-license package`), so they live beside the exe in model\ and can be
+#     replaced without a rebuild
+#   - the licence file — issued per station
+#
+# See docs/deployment/installation.md for the install and validation steps.
 
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs, collect_submodules
 
 datas = []
+binaries = []
 hiddenimports = []
 
-# OCR models + package data (only if the [ocr] extra is installed)
+# --- optional OCR engine (bundled models live inside the wheel) -------------
 try:
     datas += collect_data_files("rapidocr_onnxruntime")
     hiddenimports += collect_submodules("rapidocr_onnxruntime")
 except Exception:
     pass
 
-# Ensure our inspection tools are imported (registered via side effect)
+# --- onnxruntime: compiled providers are easy for PyInstaller to miss -------
+try:
+    binaries += collect_dynamic_libs("onnxruntime")
+    datas += collect_data_files("onnxruntime")
+except Exception:
+    pass
+
+# --- EVERY module that registers something by import side effect ------------
+# Missing one of these builds an app whose tool/reader simply is not there, and
+# it fails at run time on the line rather than at build time here. Keep this
+# list in step with vis/tools/__init__.py and vis/tools/readers.py.
 hiddenimports += [
+    # inspection tools (registered via @register on import)
     "vis.tools.code_verify",
+    "vis.tools.general",
     "vis.tools.ocr",
     "vis.tools.ocv_font",
-    "vis.tools.general",
-    "vis.tools.readers",
+    "vis.tools.print_inspect",
     "vis.tools.stub_ocv",
+    # readers + the OCR/OCV engine
+    "vis.tools.readers",
+    "vis.tools.vis_ocr_reader",
+    "vis.tools.constrained_decode",
+    "vis.tools.line_detector",
+    "vis.tools.pharmacode",
+    "vis.tools.model_integrity",
+    "vis.tools.ocv_score",
+    "vis.tools.print_quality",
+    "vis.tools.grading",
+    "vis.tools.gs1",
+    "vis.tools.transform",
+    # licensing (signed licences + encrypted models) — needs cryptography
+    "vis.licensing",
+    "vis.licensing.license",
+    "vis.licensing.fingerprint",
+    "vis.licensing.packs",
+    "vis.licensing.model_crypto",
+    "cryptography",
+    "cryptography.hazmat.primitives.asymmetric.ed25519",
+    "cryptography.hazmat.primitives.ciphers.aead",
+    "cryptography.hazmat.primitives.kdf.hkdf",
+    # camera backends available on Windows
+    "vis.camera.genicam",
+    "vis.camera.hikrobot",
+    "vis.camera.file_source",
+    # line I/O
+    "vis.io.digital_io",
+    "vis.io.encoder_reject",
+    # database migrations
+    "vis.db.models",
 ]
+
+# SQLAlchemy picks its dialect by string at run time
+hiddenimports += collect_submodules("sqlalchemy.dialects.sqlite")
 
 block_cipher = None
 
 a = Analysis(
     ["../src/vis/hmi/app.py"],
     pathex=["../src"],
-    binaries=[],
+    binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
     runtime_hooks=[],
-    excludes=[],
+    # keep the build lean: these pull in large trees we never use
+    excludes=["tkinter", "matplotlib", "pytest", "IPython", "torch"],
     cipher=block_cipher,
 )
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
@@ -55,6 +110,7 @@ exe = EXE(
     [],
     exclude_binaries=True,
     name="vis-hmi",
-    console=False,  # GUI app
+    console=False,          # GUI app: no console window on the line PC
+    icon=None,
 )
 coll = COLLECT(exe, a.binaries, a.zipfiles, a.datas, name="vis-hmi")

@@ -114,7 +114,73 @@ def _make_camera_factory():
     return _sim_factory, True
 
 
+def selftest() -> int:
+    """Report what this installation can actually do, as JSON, then exit.
+
+    Two jobs. In the build pipeline it catches the failure mode PyInstaller is
+    prone to: a tool or reader registered by import side effect gets dropped
+    from the bundle, and nobody notices until an operator runs that inspection
+    on a live line. And at a customer site it is the evidence an IQ needs —
+    which tools, which readers, which model, which licence, on this machine.
+
+        vis-hmi --selftest
+    """
+    import json
+    import platform
+
+    report: dict = {
+        "version": _app_version(),
+        "python": sys.version.split()[0],
+        "platform": f"{platform.system()} {platform.release()} ({platform.machine()})",
+        "frozen": bool(getattr(sys, "frozen", False)),
+    }
+    try:
+        from ..tools.registry import registered_types
+
+        report["tools"] = registered_types()
+    except Exception as exc:
+        report["tools_error"] = str(exc)
+    try:
+        from ..tools.readers import available_code_readers, available_text_readers
+
+        report["text_readers"] = available_text_readers()
+        report["code_readers"] = available_code_readers()
+    except Exception as exc:
+        report["readers_error"] = str(exc)
+    try:
+        from ..tools.line_detector import _find_model as _find_det
+        from ..tools.vis_ocr_reader import _find_model as _find_ocr
+
+        ocr, det = _find_ocr(), _find_det()
+        report["ocr_model"] = str(ocr) if ocr else None
+        report["detector_model"] = str(det) if det else None
+    except Exception as exc:
+        report["models_error"] = str(exc)
+    try:
+        from ..licensing import active_license, machine_fingerprint
+
+        lic = active_license()
+        report["machine_fingerprint"] = machine_fingerprint()
+        report["license"] = lic.audit_summary() if lic else None
+    except Exception as exc:
+        report["license_error"] = str(exc)
+
+    print("VERIFY" + json.dumps(report))
+    return 0
+
+
+def _app_version() -> str:
+    try:
+        from importlib.metadata import version
+
+        return version("vision-inspection")
+    except Exception:
+        return "unknown"
+
+
 def main() -> int:
+    if "--selftest" in sys.argv:
+        return selftest()
 
     # Single site config file (DB, camera, station, paths, line params). Env
     # vars still win; the file is the persistent per-install setup.

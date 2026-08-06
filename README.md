@@ -34,6 +34,7 @@ grammar-constrained decoding** (38.5% greedy; always state the decoding mode).
 | **[GUIDE.md](GUIDE.md)** | how the application works, end to end |
 | **[CONTINUE_HERE.md](CONTINUE_HERE.md)** | picking the project up on another PC / in a new session |
 | [docs/22-camera-setup.md](docs/22-camera-setup.md) | cameras, networking, and why macOS can't run one |
+| [docs/deployment/build-and-install.md](docs/deployment/build-and-install.md) | building the Windows folder and installing it on a client PC |
 | [docs/](docs/) | architecture, OCR/OCV engine, compliance, decision log |
 
 ```bash

@@ -220,6 +220,9 @@ Useful environment variables:
 | `VIS_OCR_DETECTOR_FALLBACK` | `0` disables the slow detector rescue |
 | `DATABASE_URL` | defaults to SQLite in the data dir |
 
+Building the Windows distribution and installing it on a client PC:
+[docs/deployment/build-and-install.md](docs/deployment/build-and-install.md).
+
 Deeper design docs are in `docs/` — architecture (04), OCR/OCV engine (05),
 compliance (06), camera module (10), integration protocol (12), web API (18),
 camera setup (22), and `docs/decisions/decision-log.md` for why things are the

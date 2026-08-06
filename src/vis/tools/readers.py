@@ -81,6 +81,15 @@ def _builtin_code(image, config):
 register_text_reader("builtin", _builtin_text)
 register_code_reader("builtin", _builtin_code)
 
+# Pharmacode (Laetus one-track) — the pharma line-clearance code; zxing does not
+# decode it, so it ships as its own reader (tool config reader="pharmacode").
+try:  # pragma: no cover - depends on optional cv2
+    from .pharmacode import register as _register_pharmacode
+
+    _register_pharmacode()
+except Exception:
+    pass
+
 # In-house CRNN/CTC ONNX recogniser (ocr-trainer). Registers "vis_ocr" only if
 # onnxruntime + the model file are present; a silent no-op otherwise.
 try:  # pragma: no cover - optional dependency / artifact

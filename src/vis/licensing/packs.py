@@ -52,8 +52,8 @@ PACKS: dict[str, Pack] = {
     ),
     "codes": Pack(
         "codes", "Barcode / 2D Codes",
-        "1D barcodes, DataMatrix, QR, GS1 parsing and print-quality grading.",
-        tools=("code_verify", "code_grade", "gs1"),
+        "1D barcodes, DataMatrix, QR, Pharmacode, GS1 parsing and grading.",
+        tools=("code_verify", "code_grade", "gs1", "pharmacode"),
     ),
     "label-qc": Pack(
         "label-qc", "Label Inspection",

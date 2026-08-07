@@ -165,6 +165,34 @@ def test_every_pack_has_title_and_description():
         assert pack.key == key and pack.title and pack.description
 
 
+def test_issue_all_expands_to_one_licence_for_the_whole_product(tmp_path, capsys):
+    """`--packs all` sells the product as one licence instead of capability by
+    capability — and must write out the EXPANDED list, so the licence names what
+    it grants rather than silently widening when a new pack ships."""
+    from vis.licensing.issue import main as issue_main
+
+    keyfile = tmp_path / "keys.json"
+    issue_main(["keygen", "--out", str(keyfile)])
+    out = tmp_path / "all.lic"
+    rc = issue_main(["issue", "--keyfile", str(keyfile), "--customer", "Plant X",
+                     "--packs", "all", "--out", str(out)])
+    assert rc == 0
+
+    granted = json.loads(out.read_text())["payload"]["packs"]
+    assert set(granted) == set(PACKS)
+    assert "all" not in granted            # expanded, not stored as a wildcard
+
+
+def test_issue_rejects_an_unknown_pack(tmp_path):
+    from vis.licensing.issue import main as issue_main
+
+    keyfile = tmp_path / "keys.json"
+    issue_main(["keygen", "--out", str(keyfile)])
+    rc = issue_main(["issue", "--keyfile", str(keyfile), "--customer", "X",
+                     "--packs", "codes,not-a-pack", "--out", str(tmp_path / "x.lic")])
+    assert rc == 2
+
+
 # ---- model encryption ----------------------------------------------------
 def test_encrypt_decrypt_roundtrip():
     plain = b"\x08onnx-model-bytes" * 100

@@ -21,11 +21,25 @@
 #
 # See docs/deployment/installation.md for the install and validation steps.
 
-from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs, collect_submodules
+from PyInstaller.utils.hooks import (
+    collect_data_files,
+    collect_dynamic_libs,
+    collect_submodules,
+    copy_metadata,
+)
 
 datas = []
 binaries = []
 hiddenimports = []
+
+# --- the app's own package + its dist-info -----------------------------------
+# collect_submodules picks up modules reached only through a registry/string, and
+# the metadata is what `--selftest` reports as the version (the IQ record).
+hiddenimports += collect_submodules("vis")
+try:
+    datas += copy_metadata("vision-inspection")
+except Exception:
+    pass
 
 # --- optional OCR engine (bundled models live inside the wheel) -------------
 try:
@@ -40,6 +54,18 @@ try:
     datas += collect_data_files("onnxruntime")
 except Exception:
     pass
+
+# --- GigE acquisition: harvesters + the genicam SWIG bindings ---------------
+# genicam ships compiled .pyd/.dll files that PyInstaller does not follow from
+# the import graph. Without these the build has no GenTL path at all and falls
+# back to the simulator on a line PC — which build_windows.py now fails on.
+for _pkg in ("harvesters", "genicam"):
+    try:
+        hiddenimports += collect_submodules(_pkg)
+        binaries += collect_dynamic_libs(_pkg)
+        datas += collect_data_files(_pkg)
+    except Exception:
+        pass
 
 # --- EVERY module that registers something by import side effect ------------
 # Missing one of these builds an app whose tool/reader simply is not there, and
@@ -92,7 +118,7 @@ hiddenimports += collect_submodules("sqlalchemy.dialects.sqlite")
 block_cipher = None
 
 a = Analysis(
-    ["../src/vis/hmi/app.py"],
+    ["vis_hmi_entry.py"],   # NOT src/vis/hmi/app.py — see that file's docstring
     pathex=["../src"],
     binaries=binaries,
     datas=datas,

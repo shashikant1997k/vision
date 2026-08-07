@@ -38,6 +38,33 @@ def _section_label(text: str) -> QLabel:
     return lbl
 
 
+def _waiting_caption(camera_id: str) -> str:
+    """What the live panel says between Start and the first frame.
+
+    On a triggered camera there may be no first frame for minutes — the line has
+    to move a product past the sensor. A permanent "Starting camera…" then reads
+    as a hung application, and the operator power-cycles a camera that is working
+    perfectly. Say what it is actually waiting for instead.
+    """
+    try:
+        from ..camera.settings import TriggerMode
+        from ..camera.settings_store import load_settings
+
+        settings = load_settings(camera_id)
+        if settings is None:
+            return "Starting camera…"
+        trigger = settings.trigger
+        if trigger.mode == TriggerMode.CONTINUOUS:
+            return "Starting camera…"
+        if trigger.mode == TriggerMode.SOFTWARE:
+            return "Armed — waiting for a software trigger"
+        where = trigger.source or "the trigger line"
+        return (f"Armed — waiting for a {trigger.mode.value} trigger on {where}.\n"
+                "Run the line, or switch to continuous in Settings → Camera to test.")
+    except Exception:
+        return "Starting camera…"
+
+
 class MainWindow(QMainWindow):
     """Live-view screen: annotated camera feed + running counters + start/stop.
 
@@ -77,6 +104,7 @@ class MainWindow(QMainWindow):
         self._report_dir = report_dir
         self._simulation = simulation
         self._alarm_threshold = alarm_consecutive_rejects
+        self._live_cameras: dict = {}   # camera_id -> open device, while running
         self._require_challenge_hours = require_challenge_hours
         # the operator's permissions decide which controls are even shown
         self._perms = None
@@ -90,6 +118,7 @@ class MainWindow(QMainWindow):
         self._runner: InspectionRunner | None = None
         self._batch_id: int | None = None
         self._stats = LiveStats()
+        self._stats_batch_id = None   # which batch the counters on screen describe
         self._live = LiveView()
 
         # primary run selector: open batch orders (strict flow)
@@ -183,6 +212,17 @@ class MainWindow(QMainWindow):
         self._start.setProperty("variant", "primary")
         self._stop = QPushButton("■  Stop")
         self._stop.setProperty("variant", "danger")
+        # Software trigger: in software mode the PC decides when to expose, so
+        # there has to be something to press. Shown only when the camera is
+        # actually in that mode — a dead button on a hardware-triggered line is
+        # worse than no button.
+        self._trigger_btn = QPushButton("⚡  Trigger")
+        self._trigger_btn.setToolTip(
+            "Capture one frame now (software trigger mode)."
+        )
+        self._trigger_btn.setEnabled(False)
+        self._trigger_btn.setVisible(False)
+        self._trigger_btn.clicked.connect(self.fire_software_trigger)
         self._teach = QPushButton("Teach…")
         self._teach_files = QPushButton("Teach on images…")
         self._import = QPushButton("Import recipe…")
@@ -411,6 +451,9 @@ class MainWindow(QMainWindow):
         header.addWidget(title)
         header.addSpacing(18)
         header.addWidget(self._cam_status, 1)
+        # top right: the operator fires this repeatedly while watching the feed,
+        # so it belongs next to the image, not buried in the menu
+        header.addWidget(self._trigger_btn)
         header.addWidget(self._cam_refresh)
         header_widget = QWidget()
         header_widget.setObjectName("headerBar")
@@ -495,6 +538,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Logged in as {username}")
         self._status_task = None
         self._refresh_camera_status()  # populate the camera status bar at startup
+        self._refresh_trigger_button()  # show ⚡ Trigger only for a software-trigger camera
 
         self._timer = QTimer(self)
         self._timer.setInterval(100)
@@ -775,7 +819,13 @@ class MainWindow(QMainWindow):
             self._serials = SerialRegistry(self._sf, self._batch_id)
             bus.subscribe("inspection.result", self._on_serial)
             self._close_batch.setEnabled(True)
-            self._log_event("info", "batch", f"Batch {batch_no} started")
+            # A batch starts ONCE. Every Stop/Start after that is a resume, and
+            # logging them all as "started" makes the audit trail read as eleven
+            # separate batches — the opposite of what a batch record is for.
+            # (_stats_batch_id still holds the previous run's batch here.)
+            resumed = self._stats_batch_id == self._batch_id
+            self._log_event("info", "batch",
+                            f"Batch {batch_no} {'resumed' if resumed else 'started'}")
         else:
             # --- test / setup mode — run a recipe directly, nothing recorded ---
             self._recipe, recipe_db_id = self._resolve_recipe()
@@ -784,6 +834,18 @@ class MainWindow(QMainWindow):
             self._classify_downtime()
             self._batch_id = None
             self._refresh_context_bar()
+
+        # Counters belong to ONE batch. Zero them when the run being started is
+        # for a different batch than the numbers on screen — otherwise the new
+        # batch opens showing the previous batch's totals, lanes and yield. A
+        # Stop/Start WITHIN a batch must keep counting, so this compares the
+        # batch rather than resetting on every Start. A test run (no batch) is
+        # always a fresh trial.
+        if self._batch_id is None or self._batch_id != self._stats_batch_id:
+            self._stats.reset()
+            self._failed_log.clear()
+            self._stats_batch_id = self._batch_id
+            self._refresh()  # show the zeros immediately, not on the first frame
 
         # build one assignment per camera, each with its own selected recipe
         # (the primary recipe drives the batch; batch values apply to all cameras)
@@ -805,8 +867,8 @@ class MainWindow(QMainWindow):
         self._start.setEnabled(False)
         self._stop.setEnabled(True)
         self._set_state("Starting…", "#b8860b")
-        for label in self._cam_images.values():
-            label.setText("Starting camera…")
+        for cid, label in self._cam_images.items():
+            label.setText(_waiting_caption(cid))
         QApplication.processEvents()
         try:
             for cid in self._camera_ids:
@@ -817,7 +879,9 @@ class MainWindow(QMainWindow):
                     if variable_data:
                         cam_recipe = resolve_batch_fields(cam_recipe, variable_data)
                 self._cam_recipes[cid] = cam_recipe
-                assignments.append((self._camera_factory(cid, None, cam_recipe), cam_recipe))
+                camera = self._camera_factory(cid, None, cam_recipe)
+                self._live_cameras[cid] = camera
+                assignments.append((camera, cam_recipe))
         except Exception as exc:
             # camera busy / not found — revert cleanly instead of getting stuck
             self._start.setEnabled(True)
@@ -876,6 +940,7 @@ class MainWindow(QMainWindow):
                 "Running WITHOUT a batch — results are not being recorded (test mode)"
             )
         self._refresh_camera_status()  # reflect "in use" without touching the device
+        self._refresh_trigger_button()  # software mode: the operator needs the button
 
     # ---- third-party integration (TCP + 24V) -----------------------------
     def open_challenge(self) -> None:
@@ -1135,6 +1200,19 @@ class MainWindow(QMainWindow):
             return ModbusRegisterClient(config["io_host"], int(config.get("io_port", 502)))
         return SimulatedRegisterClient()
 
+    def _plc_target(self):
+        """"host:port" of the configured PLC, or None when there isn't one and
+        the parameters screen would be talking to the simulator."""
+        from .comms_window import load_comms_config
+
+        try:
+            config = load_comms_config(self._sf)
+        except Exception:
+            return None
+        if config.get("io_backend") == "modbus" and config.get("io_host"):
+            return f"{config['io_host']}:{int(config.get('io_port', 502))}"
+        return None
+
     def open_plc_params(self) -> None:
         if self._sf is None:
             self.statusBar().showMessage("No database — PLC parameters unavailable.")
@@ -1142,7 +1220,8 @@ class MainWindow(QMainWindow):
         from .plc_params_window import PlcParametersWindow
 
         self._show_panel(lambda: PlcParametersWindow(
-            self._sf, client_factory=self._plc_register_client, parent=self,
+            self._sf, client_factory=self._plc_register_client,
+            target_provider=self._plc_target, parent=self,
         ))
 
     def closeEvent(self, event) -> None:  # fail-safe: drop READY, stop server
@@ -1223,10 +1302,55 @@ class MainWindow(QMainWindow):
         self._refresh_context_bar()
         self._close_batch.setEnabled(False)
 
+    def _software_trigger_mode(self) -> bool:
+        """Is the primary camera configured to expose on a PC command?"""
+        try:
+            from ..camera.settings import TriggerMode
+            from ..camera.settings_store import load_settings
+
+            settings = load_settings(self._camera_ids[0])
+            return settings is not None and settings.trigger.mode == TriggerMode.SOFTWARE
+        except Exception:
+            return False
+
+    def _refresh_trigger_button(self) -> None:
+        """Show the Trigger button only while a software-triggered run is live."""
+        software = self._software_trigger_mode()
+        self._trigger_btn.setVisible(software)
+        self._trigger_btn.setEnabled(software and self._runner is not None)
+
+    def fire_software_trigger(self) -> None:
+        """Expose one frame on every running camera that supports it."""
+        if self._runner is None:
+            return
+        fired, unsupported = 0, 0
+        for cid, camera in self._live_cameras.items():
+            trigger = getattr(camera, "software_trigger", None)
+            if not callable(trigger):
+                unsupported += 1
+                continue
+            try:
+                # HikrobotCamera returns None, HarvesterCamera returns a bool
+                ok = trigger()
+                fired += 1 if ok is not False else 0
+                if ok is False:
+                    unsupported += 1
+            except Exception as exc:
+                self.statusBar().showMessage(f"{cid}: software trigger failed — {exc}")
+                return
+        if fired:
+            self.statusBar().showMessage(f"Software trigger fired on {fired} camera(s).")
+        elif unsupported:
+            self.statusBar().showMessage(
+                "This camera does not accept a software trigger — use a hardware "
+                "trigger, or run continuous."
+            )
+
     def stop(self) -> None:
         if self._runner is not None:
             self._runner.stop()
             self._runner.join()
+            self._live_cameras.clear()
             pool = getattr(self._runner, "pool", None)
             if pool is not None:
                 try:
@@ -1239,6 +1363,7 @@ class MainWindow(QMainWindow):
         self._refresh()  # final counter update
         self._start.setEnabled(True)
         self._stop.setEnabled(False)
+        self._refresh_trigger_button()
         self._set_state("Idle", "#888")
         if self._signals is not None:
             self._signals.set_running(False)
@@ -1404,46 +1529,78 @@ class MainWindow(QMainWindow):
                 "and close other camera windows first."
             )
             return
-        # Force free-run so the camera yields frames at the bench regardless of a
-        # configured hardware trigger.
-        self._force_free_run(source)
+        # Teach on the SAME trigger the line will run on. Forcing free-run here
+        # taught the recipe on bench frames — different exposure moment, no
+        # strobe, product wherever it happened to sit — and the recipe then
+        # behaved differently in production. Only fall back to free-run when the
+        # camera is already continuous.
         import time
 
+        from ..camera.settings import TriggerMode
+        from ..camera.settings_store import load_settings
         from PySide6.QtWidgets import QApplication
 
-        grab = getattr(source, "grab", None)
+        saved = load_settings(self._camera_id)
+        triggered = saved is not None and saved.trigger.mode != TriggerMode.CONTINUOUS
+        if not triggered:
+            self._force_free_run(source)
 
-        def _grab_one():
-            if callable(grab):
-                try:
-                    f = grab(timeout=0.3)
-                except TypeError:
-                    f = grab()
-            else:
-                f = next(source.frames(), None)
-            return f.image if f is not None else None
+        # Grab on a background thread. Doing it on the Qt timer blocked the GUI
+        # for the whole grab timeout every tick — on a triggered camera that is
+        # continuous, so the window stopped responding to clicks entirely.
+        from ..camera.preview import PreviewGrabber
+
+        grabber = PreviewGrabber(source, timeout=0.3)
 
         # seed one frame so the Teach window has an initial reference
-        self.statusBar().showMessage("Opening live teach…")
+        where = saved.trigger.source or "the trigger line" if triggered else ""
+        if triggered:
+            self.statusBar().showMessage(
+                f"Live teach — waiting for a {saved.trigger.mode.value} trigger on "
+                f"{where}. Run the line, or pass one product."
+            )
+        else:
+            self.statusBar().showMessage("Opening live teach…")
         seed = None
-        deadline = time.monotonic() + 5.0
+        # a triggered camera images one product per pulse: allow for the line
+        # actually moving, instead of declaring the camera broken after 5 s.
+        # The wait stays responsive because the grabbing happens on the thread.
+        deadline = time.monotonic() + (30.0 if triggered else 5.0)
         while seed is None and time.monotonic() < deadline:
-            seed = _grab_one()
+            seed = grabber.latest()
             QApplication.processEvents()
+            if seed is None:
+                time.sleep(0.03)  # don't spin the CPU while the line moves
         if seed is None:
+            grabber.stop()  # never close the camera under a live grab
             close = getattr(source, "close", None)
             if callable(close):
                 close()
-            self.statusBar().showMessage("Could not acquire from the camera for Teach")
+            if triggered:
+                self.statusBar().showMessage(
+                    f"No trigger received on {where} in 30 s — the camera is armed but "
+                    "nothing pulsed it. Run the line, check the sensor wiring "
+                    "(scripts/line_monitor.py), or set Trigger → continuous to teach "
+                    "at the bench."
+                )
+            else:
+                self.statusBar().showMessage("Could not acquire from the camera for Teach")
             return
 
+        # Hand over a frame only when the camera has actually delivered a NEW
+        # one. Returning the same cached image every tick would let a capture
+        # run collect the same product ten times and call it ten samples.
+        last_seen = {"n": -1}
+
         def provider():
-            try:
-                return _grab_one()
-            except Exception:
-                return None
+            n = grabber.frame_count()
+            if n == last_seen["n"]:
+                return None  # nothing new yet — between triggers
+            last_seen["n"] = n
+            return grabber.latest()
 
         def on_close():
+            grabber.stop()  # stop grabbing BEFORE the device goes away
             close = getattr(source, "close", None)
             if callable(close):
                 close()
@@ -1453,6 +1610,8 @@ class MainWindow(QMainWindow):
         self._open_teach_with_images(
             [seed], image_provider=provider, on_close=on_close, recipe=recipe,
             product_code=product_code, product_name=product_name,
+            trigger_hint=(f"{saved.trigger.mode.value} trigger on {where}"
+                          if triggered else None),
         )
 
     def open_teach_from_files(self) -> None:
@@ -1516,7 +1675,8 @@ class MainWindow(QMainWindow):
         )
 
     def _open_teach_with_images(self, images, image_provider=None, on_close=None,
-                                recipe=None, product_code=None, product_name=None) -> None:
+                                recipe=None, product_code=None, product_name=None,
+                                trigger_hint=None) -> None:
         from .teach_window import TeachWindow
 
         lanes = sorted({region.reject_output for region in self._recipe.regions})
@@ -1532,6 +1692,7 @@ class MainWindow(QMainWindow):
             recipe=recipe,
             image_provider=image_provider,
             on_close=on_close,
+            trigger_hint=trigger_hint,
             parent=self,
             **bind,
         ))
@@ -1684,7 +1845,8 @@ class MainWindow(QMainWindow):
                     self._sf, apply_callback=self._apply_comms,
                     status_provider=self.comms_status, parent=self)))
                 tabs.append(("PLC", PlcParametersWindow(
-                    self._sf, client_factory=self._plc_register_client, parent=self)))
+                    self._sf, client_factory=self._plc_register_client,
+                    target_provider=self._plc_target, parent=self)))
                 tabs.append(("Station", StationConfigWindow(self._sf, self._user_id, self)))
             return SettingsHubWindow(tabs, parent=self)
 
@@ -1703,29 +1865,18 @@ class MainWindow(QMainWindow):
                 "and close other camera windows first."
             )
             return None
-        state = {"gen": None}
+        # Grab off the GUI thread: this preview ticks every 60 ms, and a grab that
+        # waits even 200 ms for a frame would leave the settings screen unable to
+        # process a click for most of its life.
+        from ..camera.preview import PreviewGrabber
+
+        grabber = PreviewGrabber(source, timeout=0.2)
 
         def provider():
-            # Prefer a single bounded grab (never blocks the GUI longer than the
-            # grab timeout); fall back to frames() for cameras without grab().
-            try:
-                grab = getattr(source, "grab", None)
-                if callable(grab):
-                    try:
-                        frame = grab(timeout=0.2)  # short: keep the preview snappy
-                    except TypeError:
-                        frame = grab()  # camera grab() without a timeout arg
-                else:
-                    if state["gen"] is None:
-                        state["gen"] = source.frames()
-                    frame = next(state["gen"], None)
-                    if frame is None:
-                        state["gen"] = source.frames()
-                return frame.image if frame is not None else None
-            except Exception:
-                return None  # a bad preview must never block the settings screen
+            return grabber.latest()
 
         def cleanup():
+            grabber.stop()  # stop grabbing BEFORE the device goes away
             close = getattr(source, "close", None)
             if callable(close):
                 close()
@@ -1741,6 +1892,7 @@ class MainWindow(QMainWindow):
             # Save the FULL settings (incl. the trigger choice) for Teach/Run,
             # but keep the preview free-running so it's never blank here.
             save_settings(self._camera_id, settings)
+            self._refresh_trigger_button()  # the trigger choice may have changed
             live = getattr(source, "apply_settings", None)
             if callable(live):
                 preview = _copy.deepcopy(settings)

@@ -20,7 +20,27 @@ python -m venv .venv
 .venv\Scripts\python packaging\build_windows.py
 ```
 
-That produces **`dist\vis-hmi\`** — that whole folder is the product.
+That produces **`dist\vis-hmi\`** — that whole folder is the product. One command
+does four things: builds, stages the trained models from `../ocr-trainer/model`
+into `model\` with `.sha256` manifests, verifies, and writes `SHA256SUMS.txt`
+(the digest of every shipped file, for the IQ record). It also drops
+`INSTALL.txt` in the folder for whoever installs it.
+
+The staged models are **plaintext** — right for an internal or pilot line. For a
+paying customer build with `--no-models` and stage the folder with
+`vis-license package` instead, so each model is encrypted to that licence.
+
+Model staging happens *before* verification on purpose: the `vis_ocr` reader
+registers itself only when it can find a model, so verifying an unstaged build
+reports that reader missing.
+
+> **Dependency versions are validated configuration, not a detail.** `rapidocr`
+> bundles the PP-OCR weights, so its version *is* the builtin reader's accuracy
+> — 1.3.20+ miscounts runs of identical characters (`MRP00000` → `MRP0000`).
+> OpenCV 5 changed Hershey glyph spacing and makes `print_inspect` grade good
+> print as F. onnxruntime above 1.20.1 will not load its native DLL unless the
+> machine has the VC++ 2015-2022 redistributable ≥ 14.40. `pyproject.toml` pins
+> all three with the reasoning; treat a bump as a change requiring revalidation.
 
 The build script does not just build; it **starts the frozen app and asks it
 what it can actually do**, then fails if anything is missing. This matters more
@@ -42,17 +62,35 @@ Windows build must be produced on Windows.
 
 ## 2. What to put on the line PC
 
-Copy `dist\vis-hmi\` to the machine (e.g. `C:\ControlPrint\vis-hmi\`) and add
-four things beside `vis-hmi.exe`:
+Copy `dist\vis-hmi\` to the machine (e.g. `C:\ControlPrint\vis-hmi\`). The build
+already contains the application and the models; a sold system adds a licence:
 
 ```
 C:\ControlPrint\vis-hmi\
   vis-hmi.exe            the application
+  config.json            site settings — camera, I/O, image archive, line rules
   _internal\             its libraries (do not touch)
-  model\                 this customer's .onnx + .charset.txt + .onnx.sha256
-  vision.lic             the licence issued for THIS station
-  config.json            site settings — camera, I/O, image archive
+  model\                 the .onnx + .charset.txt + .sha256   (staged by the build)
+  INSTALL.txt            what the installing engineer needs
+  SHA256SUMS.txt         digest of every file as shipped
+  vision.lic             the licence issued for THIS station  (add for a customer)
 ```
+
+`config.json` sits **beside the exe** (in a source checkout, the project root).
+The build ships it with default values so an engineer can set the camera and I/O
+before the first launch. `VIS_CONFIG` overrides the location — use it when the
+install folder is read-only.
+
+Everything else lives in `%USERPROFILE%\.vision-inspection\`: the database
+(users, recipes, batches, audit trail), reports, archived images and the
+per-camera exposure/trigger settings.
+
+> **Upgrading: back up `config.json` first.** It is in the folder you are about
+> to replace. Copy it out, drop the new build in, copy it back. The data dir is
+> untouched, so recipes, batches and the audit trail survive either way. A build
+> that inherits a station's old config from the user profile is migrated
+> automatically on first run — but only once, and only if the app folder is
+> writable.
 
 They are separate on purpose:
 

@@ -1,0 +1,104 @@
+Vision Inspection System - Windows distribution
+================================================
+
+This folder is self-contained. There is no installer, no Python and no internet
+needed on the target PC: copy the WHOLE folder across and run vis-hmi.exe.
+
+    1. Copy this folder to the line PC, e.g.  C:\ControlPrint\vis-hmi\
+    2. Double-click  vis-hmi.exe
+    3. Log in with  admin / admin123  -- then change that password immediately.
+       It is seeded only so a fresh install can be opened.
+
+Do not move vis-hmi.exe out of this folder. It needs _internal\ and model\
+beside it.
+
+
+What is in here
+---------------
+  vis-hmi.exe      the operator application
+  config.json      SITE SETTINGS -- camera, I/O, image archive, line rules.
+                   Edit this before the first launch. See below.
+  _internal\       Python runtime, Qt, OpenCV, onnxruntime (do not touch)
+  model\           the trained OCR models + their .sha256 integrity manifests
+                     ocrab_svtr256.onnx        SVTR/CTC text recogniser
+                     ocrab_svtr256.charset.txt its charset (must match the model)
+                     textline_det.onnx         YOLO text-line detector
+  SHA256SUMS.txt   digest of every file, as shipped (IQ evidence)
+
+
+Where your data lives
+---------------------
+The settings are here, beside the exe. The DATA is in the user profile:
+
+    %USERPROFILE%\.vision-inspection\
+        vis.db         the database: users, recipes, batches, audit trail
+        reports\       signed batch reports
+        images\        archived inspection images
+        camera_settings\  exposure, gain, trigger mode, per camera
+
+  >> UPGRADING: back up config.json first. <<
+
+  It lives in this folder, so replacing the folder REPLACES IT. Copy it out,
+  drop the new build in, copy it back. Your recipes, batches, audit trail and
+  camera settings are in the user profile and are not affected.
+
+
+Connecting the camera
+---------------------
+The camera vendor's GenTL producer is licensed by the vendor and is NOT bundled.
+Install the vendor SDK on the line PC first (e.g. Baumer GAPI SDK), then edit
+config.json in this folder:
+
+    "camera": {
+        "source": "gige",
+        "gentl_cti": "C:\\Program Files\\Baumer\\...\\bgapi2_gige.cti",
+        "device_id": "<camera serial number>",
+        "packet_size": 1500
+    }
+
+Prefer device_id (the serial) over index -- discovery order changes between
+boots. Set packet_size 1500 unless the NIC, switch and cable all pass jumbo
+frames; a camera left on jumbo streams nothing through a NIC that cannot, and
+that is the most common "connects but no image" fault.
+
+Give the NIC a static IP on the camera's subnet and disable other adapters
+(especially Wi-Fi) while setting up. The camera must answer ping first.
+
+No camera yet? Set "source": "file" and "file_dir" to a folder of product
+images, and the whole pipeline runs off saved images at full speed.
+
+
+Reading accuracy
+----------------
+The recogniser is trained on OCR-A / OCR-B coder fonts. Accuracy depends on the
+image: square-on, evenly lit, roughly 20 px character height or better. A phone
+snapshot will not read, and the app is built to refuse rather than guess -- a
+low-confidence read fails the inspection instead of inventing a value.
+
+Field accuracy comes from grammar-constrained decoding, so teach each field with
+its pattern (match "regex" + pattern, or match "exact" + expected) rather than
+leaving it to read freely.
+
+
+Before this goes to a paying customer
+-------------------------------------
+This build is right for an internal or pilot line. It is NOT the shipping
+configuration for a sold system, because:
+
+  - the models here are PLAINTEXT. For a customer, run  vis-license package
+    instead, which encrypts each model to that customer's licence so a copied
+    model file is inert elsewhere.
+  - there is no licence file. Issue one per station and set
+    VIS_LICENSE_REQUIRED=1 and VIS_MODEL_STRICT=1 so the app refuses to start
+    unlicensed or with an unmanifested model.
+  - a PyInstaller bundle can be unpacked. Real protection is the signed licence
+    plus encrypted models (and, when funded, a Nuitka Commercial build).
+  - the IQ/OQ validation pack has to be executed on the installed system.
+
+To record what this installation actually is (the IQ evidence -- version, tools,
+readers, resolved models, machine fingerprint, licence state):
+
+    vis-hmi.exe --selftest > IQ-<station>.json
+
+Run that again after any upgrade and diff it against the last record. That diff
+is your change-control evidence.

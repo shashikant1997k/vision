@@ -68,6 +68,18 @@ class LiveStats:
             out["yield"] = (100.0 * out["passed"] / out["total"]) if out["total"] else 0.0
             return out
 
+    def reset(self) -> None:
+        """Clear every counter — totals, per-camera, per-lane, reject reasons.
+
+        Counters describe ONE batch. Carrying them into the next one inflates its
+        totals with product that was never part of it and reports a yield that
+        belongs to neither, which in a GMP batch record is a data-integrity
+        defect, not a cosmetic one."""
+        with self._lock:
+            self._per_camera.clear()
+            self._cycle_last = 0.0
+            self._cycle_avg = 0.0
+
     def reset_consecutive(self) -> None:
         """Clear the consecutive-reject streak on all cameras — used when the
         operator acknowledges a line-stop alarm so a restart doesn't re-trip it."""

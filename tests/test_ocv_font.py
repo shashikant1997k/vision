@@ -16,6 +16,8 @@ def _font(size):
         "/System/Library/Fonts/Menlo.ttc",
         "/System/Library/Fonts/Courier.ttc",
         "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+        "C:\\Windows\\Fonts\\consola.ttf",
+        "C:\\Windows\\Fonts\\cour.ttf",
     ]:
         try:
             return ImageFont.truetype(p, size)

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import numpy as np
-from PySide6.QtCore import Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QBrush, QColor
+from PySide6.QtCore import QSize, Qt, QThread, QTimer, Signal
+from PySide6.QtGui import QBrush, QColor, QIcon
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -13,6 +13,8 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QMainWindow,
     QPushButton,
     QScrollArea,
@@ -97,10 +99,14 @@ class TeachWindow(QMainWindow):
         recipe=None,
         image_provider=None,
         on_close=None,
+        trigger_hint: str | None = None,
         parent=None,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Vision Inspection — Teach")
+        # Set when the camera images on a trigger rather than free-running, so
+        # the screen can say "waiting for product" instead of looking frozen.
+        self._trigger_hint = trigger_hint
         self._user_id = user_id
         # bank of captured product images; teach on one, test across all
         self._bank = list(reference_images) if reference_images else [reference_image]
@@ -132,6 +138,15 @@ class TeachWindow(QMainWindow):
         self._live_timer = QTimer(self)
         self._live_timer.setInterval(120)
         self._live_timer.timeout.connect(self._live_tick)
+        # burst capture: collect N product images off the moving line, then teach
+        # on one and Test all against the rest
+        self._burst_remaining = 0
+        self._burst_total = 0
+        self._burst_frames: list = []
+        self._burst_times: list[str] = []
+        # whether anything real has been captured yet — the bank starts holding a
+        # placeholder frame, which a first capture should replace rather than grow
+        self._captured_any = False
 
         h, w = reference_image.shape[:2]
         # Start with one product covering the whole image (the common single-
@@ -182,6 +197,20 @@ class TeachWindow(QMainWindow):
         self._snap_btn.setProperty("variant", "primary")
         self._snap_btn.setToolTip("Freeze the current live frame to draw inspection boxes on.")
         self._snap_btn.clicked.connect(self._snap)
+        # Capture a run of products off the moving conveyor. One snap teaches a
+        # recipe that only works on that one part; a burst captures the real
+        # variation (position, print, lighting) so Test all is meaningful.
+        self._burst_count = QSpinBox()
+        self._burst_count.setRange(2, 100)
+        self._burst_count.setValue(10)
+        self._burst_count.setFixedWidth(56)
+        self._burst_count.setToolTip("How many product images to capture in one run.")
+        self._burst_btn = QPushButton("◉◉ Capture")
+        self._burst_btn.setToolTip(
+            "Run the conveyor and capture this many frames in a row, then teach on "
+            "one and Test all against the rest."
+        )
+        self._burst_btn.clicked.connect(self._start_burst)
         film = QHBoxLayout()
         film.addWidget(prev_btn)
         film.addWidget(self._img_label)
@@ -194,13 +223,34 @@ class TeachWindow(QMainWindow):
         film.addStretch(1)
         film.addWidget(self._live_btn)
         film.addWidget(self._snap_btn)
+        film.addWidget(self._burst_count)
+        film.addWidget(self._burst_btn)
         film.addWidget(test_all_btn)
         film_widget = QWidget()
         film_widget.setLayout(film)
 
+        # --- captured-image strip: thumbnail + capture time, click to open ---
+        # A burst is 10 near-identical frames; "Image 4 / 10" tells the operator
+        # nothing about which one to teach on. Seeing them is the whole point.
+        self._thumbs = QListWidget()
+        self._thumbs.setViewMode(QListWidget.IconMode)
+        self._thumbs.setIconSize(QSize(112, 84))
+        self._thumbs.setGridSize(QSize(124, 104))
+        self._thumbs.setFlow(QListWidget.LeftToRight)
+        self._thumbs.setWrapping(False)
+        self._thumbs.setMovement(QListWidget.Static)
+        self._thumbs.setSelectionMode(QListWidget.SingleSelection)
+        self._thumbs.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self._thumbs.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._thumbs.setFixedHeight(126)   # one row of thumbnails + its scrollbar
+        self._thumbs.setToolTip("Captured images — click one to teach on it.")
+        self._thumbs.currentRowChanged.connect(self._thumb_selected)
+        self._capture_times: list[str] = []
+
         left = QVBoxLayout()
         left.addWidget(self._image, 1)
         left.addWidget(film_widget)
+        left.addWidget(self._thumbs)
         left.addWidget(self._guide)
         left_widget = QWidget()
         left_widget.setLayout(left)
@@ -344,6 +394,7 @@ class TeachWindow(QMainWindow):
         self._rebuild_tree()
         self._set_guide("Click <b>Read Code</b> or <b>Read Text</b>, then drag a box on the image.")
         self._update_img_label()
+        self._rebuild_thumbs()
         self._refresh_view()
         # warm the OCR model in the background so the first Test isn't blocked by
         # the one-time model load (a few seconds otherwise)
@@ -394,6 +445,37 @@ class TeachWindow(QMainWindow):
     def _update_img_label(self) -> None:
         self._img_label.setText(f"Image {self._reference_index + 1} / {len(self._bank)}")
 
+    def _capture_label(self, index: int) -> str:
+        """Time this image was captured — the operator's way of telling one
+        near-identical blister from the next."""
+        if index < len(self._capture_times):
+            return self._capture_times[index]
+        return f"#{index + 1}"
+
+    def _rebuild_thumbs(self) -> None:
+        """Refresh the strip from the image bank."""
+        from .image import numpy_to_qpixmap
+
+        blocked = self._thumbs.blockSignals(True)   # rebuilding must not re-select
+        self._thumbs.clear()
+        for i, image in enumerate(self._bank):
+            item = QListWidgetItem(f"{i + 1}  {self._capture_label(i)}")
+            try:
+                pixmap = numpy_to_qpixmap(image).scaled(
+                    112, 84, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                item.setIcon(QIcon(pixmap))
+            except Exception:
+                pass                                # a bad frame must not kill the strip
+            item.setToolTip(f"Image {i + 1} — captured {self._capture_label(i)}")
+            self._thumbs.addItem(item)
+        self._thumbs.setCurrentRow(self._reference_index)
+        self._thumbs.blockSignals(blocked)
+
+    def _thumb_selected(self, row: int) -> None:
+        if row < 0 or row == self._reference_index:
+            return
+        self._set_reference_index(row)
+
     def _set_reference_index(self, index: int) -> None:
         if not self._bank:
             return
@@ -402,6 +484,10 @@ class TeachWindow(QMainWindow):
         self._last_results = None
         self._image.reset_view()  # back to fit when switching images
         self._update_img_label()
+        if self._thumbs.currentRow() != self._reference_index:
+            blocked = self._thumbs.blockSignals(True)
+            self._thumbs.setCurrentRow(self._reference_index)
+            self._thumbs.blockSignals(blocked)
         self._refresh_view()
 
     def _prev_image(self) -> None:
@@ -1232,29 +1318,115 @@ class TeachWindow(QMainWindow):
     # ---- live camera teaching --------------------------------------------
     def _live_tick(self) -> None:
         frame = self._image_provider() if self._image_provider is not None else None
-        if frame is not None:
-            self._live_frame = frame
-            self._image.setImage(frame)  # raw live frame, no ROI overlay
+        if frame is None:
+            return  # hardware trigger: no product has passed the sensor yet
+        self._live_frame = frame
+        self._image.setImage(frame)  # raw live frame, no ROI overlay
+        if self._burst_remaining > 0:
+            self._collect_burst_frame(frame)
 
     def _go_live(self) -> None:
         if self._image_provider is None:
             return
         self._live = True
-        self._set_guide(
-            "● LIVE — position the product in view, then click <b>Snap</b> to freeze it."
-        )
+        if self._trigger_hint:
+            self._set_guide(
+                f"● LIVE on {self._trigger_hint} — the image updates as each product "
+                "passes the sensor. Use <b>Capture</b> to collect a run, or "
+                "<b>Snap</b> to keep the one on screen."
+            )
+        else:
+            self._set_guide(
+                "● LIVE — position the product in view, then click <b>Snap</b> to freeze it."
+            )
         self._live_timer.start()
+
+    def _start_burst(self) -> None:
+        """Capture N frames in a row off the running line into the image bank."""
+        if self._image_provider is None:
+            return
+        if not self._live:
+            self._go_live()
+        self._burst_remaining = int(self._burst_count.value())
+        self._burst_total = self._burst_remaining
+        self._burst_frames = []
+        self._burst_times = []
+        self._burst_btn.setEnabled(False)
+        source = f"one per {self._trigger_hint}" if self._trigger_hint else "as they arrive"
+        self._set_guide(
+            f"● CAPTURING 0/{self._burst_total} — run the line. Frames are kept "
+            f"{source}."
+        )
+
+    def _commit_burst(self) -> None:
+        """Move the collected frames into the image bank and refresh the strip."""
+        if not self._burst_frames:
+            return
+        # Replace a bank that is still just the placeholder the window opened
+        # with; otherwise add to what the user already has.
+        if len(self._bank) == 1 and not self._captured_any:
+            self._bank = list(self._burst_frames)
+            self._capture_times = list(self._burst_times)
+        else:
+            self._bank.extend(self._burst_frames)
+            self._capture_times.extend(self._burst_times)
+        self._captured_any = True
+        self._burst_frames = []
+        self._burst_times = []
+
+    def _collect_burst_frame(self, frame) -> None:
+        import time
+
+        self._burst_frames.append(frame)
+        self._burst_times.append(time.strftime("%H:%M:%S"))
+        self._burst_remaining -= 1
+        done = len(self._burst_frames)
+        self._set_guide(f"● CAPTURING {done}/{self._burst_total} — keep the line running.")
+        if self._burst_remaining > 0:
+            return
+
+        self._commit_burst()
+        self._burst_btn.setEnabled(True)
+        self._live_timer.stop()
+        self._live = False
+        self._rebuild_thumbs()
+        self._set_reference_index(0)   # teach on the first, Test all across the rest
+        self._last_results = None
+        self._image.reset_view()
+        self._refresh_view()
+        self._set_guide(
+            f"Captured {len(self._bank)} images ✓ — pick one from the strip below, draw "
+            "your inspection boxes on it, then <b>Test all</b> to check every product."
+        )
+
+    def _cancel_burst(self) -> None:
+        """Abandon a capture run — keeps whatever it already collected so a line
+        that stopped early is not a total loss."""
+        had_frames = bool(self._burst_frames)
+        self._commit_burst()
+        self._burst_remaining = 0
+        self._burst_btn.setEnabled(True)
+        if had_frames:
+            self._rebuild_thumbs()
 
     def _snap(self) -> None:
         if not self._live:
             return
+        self._cancel_burst()  # Snap during a capture run ends it
+        self._captured_any = True
         self._live_timer.stop()
         self._live = False
         if self._live_frame is not None:
+            import time
+
             self._reference = self._live_frame
             self._bank[self._reference_index] = self._live_frame
+            while len(self._capture_times) <= self._reference_index:
+                self._capture_times.append("")
+            self._capture_times[self._reference_index] = time.strftime("%H:%M:%S")
             self._last_results = None
             self._image.reset_view()
+            self._rebuild_thumbs()
         self._refresh_view()
         self._set_guide(
             "Snapped ✓ — pick <b>Read Code</b>/<b>Read Text</b> and drag a box. "

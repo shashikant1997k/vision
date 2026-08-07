@@ -70,9 +70,16 @@ def _issue(args) -> int:
               file=sys.stderr)
         return 2
     packs = [p.strip() for p in args.packs.split(",") if p.strip()]
+    # "all" = one licence for the whole product, rather than selling capability
+    # by capability. Expanded here, at issue time, so the licence still names
+    # every pack it grants — a licence that just said "all" would silently widen
+    # whenever a new pack shipped, which is not something to discover in an audit.
+    if any(p.lower() == "all" for p in packs):
+        packs = list(PACKS)
     unknown = [p for p in packs if p not in PACKS]
     if unknown:
-        print(f"unknown pack(s): {', '.join(unknown)}\nknown: {', '.join(PACKS)}", file=sys.stderr)
+        print(f"unknown pack(s): {', '.join(unknown)}\nknown: {', '.join(PACKS)}, or 'all'",
+              file=sys.stderr)
         return 2
     payload = {
         "license_id": args.license_id or f"CPL-{date.today():%Y}-{args.serial:04d}",
@@ -147,7 +154,9 @@ def main(argv: list[str] | None = None) -> int:
     i = sub.add_parser("issue", help="issue a signed license")
     i.add_argument("--keyfile", default="vendor_keys.json")
     i.add_argument("--customer", required=True)
-    i.add_argument("--packs", required=True, help=f"comma-separated: {', '.join(PACKS)}")
+    i.add_argument("--packs", required=True,
+                   help=f"comma-separated: {', '.join(PACKS)} — or 'all' for a "
+                        "single licence covering the whole product")
     i.add_argument("--machine", action="append", help="fingerprint to lock to (repeatable)")
     i.add_argument("--seats", type=int, default=1)
     i.add_argument("--expires", default=None, help="YYYY-MM-DD (omit = perpetual)")

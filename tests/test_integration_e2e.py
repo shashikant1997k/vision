@@ -5,6 +5,7 @@ driving the 24V signal outputs."""
 import json
 import os
 import socket
+import time
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -34,6 +35,87 @@ def _setup(tmp_path):
     users.seed_roles()
     admin = users.create_user("admin", "Secret123", roles=("admin",))
     return sf, admin
+
+
+def _main_window(sf, admin, tmp_path, frames=1):
+    from vis.hmi.main_window import MainWindow
+
+    def factory(camera_id, settings, recipe):
+        return SimulatedCodeCamera(camera_id, recipe, num_frames=frames,
+                                   defect_rate=0.0, seed=0)
+
+    return MainWindow(username="admin", recipe=build_code_demo_recipe(),
+                      camera_factory=factory, session_factory=sf, user_id=admin)
+
+
+def test_trigger_button_hidden_unless_the_camera_is_software_triggered(tmp_path, monkeypatch):
+    """A button that does nothing on a hardware-triggered line is worse than no
+    button — the operator presses it and concludes the app is broken."""
+    _qapp()
+    sf, admin = _setup(tmp_path)
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+
+    from vis.camera.settings import CameraSettings, TriggerConfig, TriggerMode
+    from vis.camera.settings_store import save_settings
+
+    # isHidden(), not isVisible(): the window itself is never shown in a test, and
+    # Qt reports every child of an unshown window as invisible
+    win = _main_window(sf, admin, tmp_path)
+    assert win._trigger_btn.isHidden()               # nothing saved: not software
+
+    save_settings("cam1", CameraSettings(
+        trigger=TriggerConfig(mode=TriggerMode.HARDWARE, source="Line0")))
+    win._refresh_trigger_button()
+    assert win._trigger_btn.isHidden()
+
+    save_settings("cam1", CameraSettings(trigger=TriggerConfig(mode=TriggerMode.SOFTWARE)))
+    win._refresh_trigger_button()
+    assert not win._trigger_btn.isHidden()
+    assert not win._trigger_btn.isEnabled()          # shown, but not until running
+    win.close()
+
+
+def test_software_trigger_fires_every_running_camera(tmp_path, monkeypatch):
+    _qapp()
+    sf, admin = _setup(tmp_path)
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+
+    fired = []
+
+    class _Triggerable:
+        def software_trigger(self):
+            fired.append(True)
+            return True
+
+    win = _main_window(sf, admin, tmp_path)
+    win.fire_software_trigger()                      # not running: must be a no-op
+    assert fired == []
+
+    win._runner = object()                           # pretend a run is live
+    win._live_cameras = {"cam1": _Triggerable(), "cam2": _Triggerable()}
+    win.fire_software_trigger()
+    assert len(fired) == 2
+    win._runner = None
+    win.close()
+
+
+def test_software_trigger_reports_a_camera_that_cannot_do_it(tmp_path, monkeypatch):
+    """A camera without the command must say so, not look like a silent success."""
+    _qapp()
+    sf, admin = _setup(tmp_path)
+    monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path)
+
+    class _Refuses:
+        def software_trigger(self):
+            return False                             # HarvesterCamera's "no such node"
+
+    win = _main_window(sf, admin, tmp_path)
+    win._runner = object()
+    win._live_cameras = {"cam1": _Refuses()}
+    win.fire_software_trigger()
+    assert "does not accept a software trigger" in win.statusBar().currentMessage()
+    win._runner = None
+    win.close()
 
 
 def test_settings_service_roundtrip(tmp_path):
@@ -143,8 +225,12 @@ def test_remote_start_signal_is_thread_safe(tmp_path):
 
     from vis.hmi.main_window import MainWindow
 
+    # Enough frames that the run is still going while we poll below. With a
+    # single frame the run can finish first, and then the refresh timer's
+    # auto-stop for a bounded source (MainWindow._refresh) sets _runner back to
+    # None — so the assertion was racing the run rather than the start signal.
     def factory(camera_id, settings, recipe):
-        return SimulatedCodeCamera(camera_id, recipe, num_frames=1, defect_rate=0.0, seed=0)
+        return SimulatedCodeCamera(camera_id, recipe, num_frames=400, defect_rate=0.0, seed=0)
 
     win = MainWindow(username="admin", recipe=build_code_demo_recipe(),
                      camera_factory=factory, session_factory=sf, user_id=admin)
@@ -156,12 +242,12 @@ def test_remote_start_signal_is_thread_safe(tmp_path):
     assert reply["ok"] is True
 
     app = _qapp()
-    for _ in range(50):
+    for _ in range(200):
         app.processEvents()  # deliver the queued cross-thread signal
         if win._runner is not None:
             break
+        time.sleep(0.01)  # the server thread may not have handled "start" yet
     assert win._runner is not None  # remote start reached the GUI thread
-    win._runner.join()
-    win.stop()
+    win.stop()  # stop() joins the runner; don't wait out all 400 frames
     client.close()
     win.close()

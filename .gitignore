@@ -29,6 +29,19 @@ oq-evidence.xml
 models/ppocrv4/*.onnx
 *.onnx
 
+# Site config now lives beside the application (project root in a source
+# checkout). It is per-machine — camera serial, GenTL path, I/O addresses — so
+# it must never be committed and shared between stations.
+/config.json
+
 # HMI runtime logs
 hmi_out.log
 hmi_err.log
+
+# Licensing secrets. `vis-license keygen` defaults to ./vendor_keys.json, which
+# holds the Ed25519 PRIVATE signing key — the root of trust for every licence we
+# ever issue. Committing it once would let anyone mint licences for any station,
+# and no software update can revoke that. Keep the private key offline.
+vendor_keys.json
+*_keys.json
+*.lic

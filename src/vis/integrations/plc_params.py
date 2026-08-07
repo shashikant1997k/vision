@@ -89,13 +89,22 @@ class ModbusRegisterClient:
         self._client.close()
 
 
-def read_all(client: RegisterClient, params: list[PlcParameter]) -> dict[str, int]:
-    """Read every parameter's current value. Unreadable params are omitted."""
+def read_all(client: RegisterClient, params: list[PlcParameter],
+             errors: list[tuple[str, str]] | None = None) -> dict[str, int]:
+    """Read every parameter's current value.
+
+    A parameter that cannot be read is omitted from the result and, if `errors`
+    is given, appended to it as (name, reason). Pass `errors` and show them: a
+    silently short read looks identical to a successful one, and "the register
+    reads 0" is a very different fact from "the register could not be read".
+    """
     out: dict[str, int] = {}
     for p in params:
         try:
             out[p.name] = client.read(p.address, p.kind)
-        except Exception:
+        except Exception as exc:
+            if errors is not None:
+                errors.append((p.name, f"{type(exc).__name__}: {exc}"))
             continue
     return out
 

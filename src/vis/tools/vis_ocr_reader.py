@@ -15,6 +15,7 @@ or the model file is absent, so importing this module is always safe.
 from __future__ import annotations
 
 import os
+import sys
 import threading
 from pathlib import Path
 
@@ -35,6 +36,10 @@ def _candidate_model_paths() -> list[Path]:
         Path.home() / "camera/ocr-trainer/model",              # Linux VM layout
         Path.cwd() / "model",
     ]
+    # frozen build: model\ sits beside vis-hmi.exe, which is NOT necessarily the
+    # working directory (a desktop shortcut can set any "Start in" folder).
+    if getattr(sys, "frozen", False):
+        dirs.insert(0, Path(sys.executable).resolve().parent / "model")
     # parallel-repo layout: <parent of the camera project>/ocr-trainer/model
     # (this file is .../camera/src/vis/tools/vis_ocr_reader.py -> parents[3]=camera)
     try:

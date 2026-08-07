@@ -13,19 +13,46 @@ A starter file with every option is written on first run if none exists.
 from __future__ import annotations
 
 import json
+import logging
 import os
+import sys
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 
 
 def data_dir() -> Path:
+    """Per-user DATA: the database, reports, archived images, camera settings.
+
+    Deliberately not the app folder — this is the material that must survive an
+    upgrade, and an upgrade replaces the app folder wholesale."""
     d = Path.home() / ".vision-inspection"
     d.mkdir(exist_ok=True)
     return d
 
 
+def app_dir() -> Path:
+    """Where the application itself lives: the folder holding vis-hmi.exe in a
+    frozen build, the project root in a source checkout."""
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parents[2]   # src/vis/config.py -> project root
+
+
+def legacy_config_path() -> Path:
+    """Where config.json used to live, before it moved beside the application."""
+    return Path.home() / ".vision-inspection" / "config.json"
+
+
 def config_path() -> Path:
+    """The site config: beside vis-hmi.exe, or the project root when run from
+    source. VIS_CONFIG overrides for a second profile or a read-only install.
+
+    NOTE this file sits IN the application folder, so replacing that folder on an
+    upgrade replaces the config too — keep a copy before upgrading. The database,
+    reports and images stay in data_dir() and are unaffected."""
     p = os.environ.get("VIS_CONFIG")
-    return Path(p) if p else data_dir() / "config.json"
+    return Path(p) if p else app_dir() / "config.json"
 
 
 DEFAULTS: dict = {
@@ -54,7 +81,9 @@ DEFAULTS: dict = {
         "detector_fallback": True,  # allow the slow detector rescue on a weak read
     },
     "line": {
-        "alarm_consecutive_rejects": 5,   # stop a production batch after N rejects in a row
+        # stop a production batch after N rejects in a row; 0 disables the alarm.
+        # This is only the fallback — the live value comes from config.json.
+        "alarm_consecutive_rejects": 5,
         "require_challenge_hours": 0,     # require a passing challenge test within N h (0 = off)
     },
     "images": {
@@ -78,6 +107,25 @@ def _merge(base: dict, over: dict) -> dict:
     return out
 
 
+def _migrate_legacy_config(target: Path) -> None:
+    """Carry a pre-move config.json over to the application folder.
+
+    config.json used to live in the user profile. Silently ignoring the old file
+    would strand a commissioned station on defaults — wrong camera, wrong I/O,
+    wrong reject rules — which on a line means inspecting nothing while looking
+    like it works. Copy it instead, and leave the original where it is."""
+    legacy = legacy_config_path()
+    if not legacy.is_file():
+        return
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(legacy.read_text(encoding="utf-8"), encoding="utf-8")
+        log.info("moved config.json from %s to %s", legacy, target)
+    except Exception as exc:      # read-only app dir, permissions, …
+        log.warning("could not move %s to %s (%s); using the old location",
+                    legacy, target, exc)
+
+
 class AppConfig:
     def __init__(self, data: dict) -> None:
         self._d = data
@@ -86,6 +134,13 @@ class AppConfig:
     def load(cls) -> "AppConfig":
         data = dict(DEFAULTS)
         path = config_path()
+        explicit = bool(os.environ.get("VIS_CONFIG"))
+        if not path.exists() and not explicit:
+            _migrate_legacy_config(path)
+        # If the copy could not be made (read-only install folder), still honour
+        # the old file rather than silently commissioning the station on defaults.
+        if not path.exists() and not explicit and legacy_config_path().is_file():
+            path = legacy_config_path()
         if path.exists():
             try:
                 data = _merge(DEFAULTS, json.loads(path.read_text()))
@@ -95,7 +150,7 @@ class AppConfig:
             try:
                 path.write_text(json.dumps(DEFAULTS, indent=2))  # write a starter file
             except Exception:
-                pass
+                pass  # read-only install dir: run on defaults rather than refuse
         return cls(data)
 
     def save(self) -> None:
@@ -117,6 +172,18 @@ class AppConfig:
 
     def require_challenge_hours(self) -> int:
         return int(self._d.get("line", {}).get("require_challenge_hours", 0) or 0)
+
+    # --- line I/O/PLC link: seeds the Comms screen on a fresh station, so a
+    # plant can commission the PLC by editing config.json beside the exe and
+    # never has to open the UI first. Anything saved in Comms then wins.
+    def io_backend(self) -> str:
+        return str(self._d.get("io", {}).get("backend", "") or "")
+
+    def io_host(self) -> str:
+        return str(self._d.get("io", {}).get("host", "") or "")
+
+    def io_port(self) -> int:
+        return int(self._d.get("io", {}).get("port", 502) or 502)
 
     def image_policy(self) -> str:
         """Which frames to archive: none | fails | all."""

@@ -12,6 +12,7 @@ dependency. Model ``textline_det.onnx`` is produced by the ocr-trainer project.
 from __future__ import annotations
 
 import os
+import sys
 import threading
 from pathlib import Path
 
@@ -38,6 +39,10 @@ def _candidate_paths() -> list[Path]:
             Path.home() / "Personal/camera/ocr-trainer/model",   # Mac dev layout
             Path.home() / "camera/ocr-trainer/model",            # Linux VM layout
             Path.cwd() / "model"]
+    # frozen build: model\ sits beside vis-hmi.exe, which is NOT necessarily the
+    # working directory (a desktop shortcut can set any "Start in" folder).
+    if getattr(sys, "frozen", False):
+        dirs.insert(0, Path(sys.executable).resolve().parent / "model")
     # parallel-repo layout: <parent of the camera project>/ocr-trainer/model
     try:
         dirs.append(Path(__file__).resolve().parents[3].parent / "ocr-trainer" / "model")

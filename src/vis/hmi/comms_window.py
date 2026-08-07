@@ -40,8 +40,22 @@ DEFAULTS = {
 
 def load_comms_config(session_factory) -> dict:
     config = dict(DEFAULTS)
+    # config.json's `io` block seeds the PLC link. Without this the block is
+    # dead text: an engineer sets the PLC address in the file beside the exe,
+    # the app ignores it, and the PLC screen quietly talks to the simulator.
+    try:
+        from ..config import AppConfig
+
+        app_config = AppConfig.load()
+        if app_config.io_backend():
+            config["io_backend"] = app_config.io_backend()
+        if app_config.io_host():
+            config["io_host"] = app_config.io_host()
+            config["io_port"] = app_config.io_port()
+    except Exception:
+        pass  # a bad config file must never stop comms loading
     saved = SettingsService(session_factory).get(COMMS_KEY) or {}
-    config.update(saved)
+    config.update(saved)  # anything saved in the Comms screen wins
     merged_signals = dict(DEFAULTS["signals"])
     merged_signals.update(saved.get("signals") or {})
     config["signals"] = merged_signals

@@ -20,12 +20,84 @@ def _gige_setting(env: str, default: int) -> int:
         return default
 
 
-def _try_set(node_map, name: str, value) -> None:
-    """Set a GenICam feature node if the camera exposes it (cameras vary)."""
+def _try_set(node_map, name: str, value) -> bool:
+    """Set a GenICam feature node if the camera exposes it (cameras vary).
+    Returns whether it took, so a caller can fall back to another node."""
     try:
         getattr(node_map, name).value = value
+        return True
+    except Exception:
+        return False
+
+
+def _output_lines(node_map) -> list[str]:
+    """The I/O lines this camera can DRIVE (LineMode == Output).
+
+    Which line is an output is fixed in hardware and differs per model — on a
+    Baumer VCXG-24C, Line0-2 are inputs and Line3 is the output — so the strobe
+    wiring cannot be assumed, it has to be asked for."""
+    found: list[str] = []
+    try:
+        previous = node_map.LineSelector.value
+        for name in node_map.LineSelector.symbolics:
+            if not _try_set(node_map, "LineSelector", name):
+                continue
+            try:
+                if node_map.LineMode.value == "Output":
+                    found.append(name)
+            except Exception:
+                pass
+        _try_set(node_map, "LineSelector", previous)
     except Exception:
         pass
+    return found
+
+
+def _apply_strobe(node_map, light) -> None:
+    """Drive the lighting from the camera's output line.
+
+    A strobe wired to the camera is the camera's job to fire: the light must be
+    on for the exposure of THAT product and dark otherwise, and only the camera
+    knows when it is exposing. Configuring it in the vendor's viewer does not
+    survive — the line resets to LineSource=Off — so the app has to program it
+    on every connect or the light simply never comes on.
+    """
+    lines = _output_lines(node_map)
+    # lighting.channel names the wired line (e.g. "Line3"); otherwise take the
+    # camera's only output
+    target = (getattr(light, "channel", "") or "").strip() or (lines[0] if lines else "")
+    if not target:
+        return
+    if not _try_set(node_map, "LineSelector", target):
+        return
+    if not light.strobe:
+        _try_set(node_map, "LineSource", "Off")
+        return
+
+    # Timer1 gives an independent delay + width, so the flash can be shorter
+    # than (and offset from) the exposure — that is what freezes a moving part.
+    driven = False
+    if light.strobe_width_us:
+        _try_set(node_map, "TimerSelector", "Timer1")
+        _try_set(node_map, "TimerTriggerSource", "ExposureStart")
+        _try_set(node_map, "TimerTriggerActivation", "RisingEdge")
+        _try_set(node_map, "TimerDelay", float(light.strobe_delay_us))
+        _try_set(node_map, "TimerDuration", float(light.strobe_width_us))
+        _try_set(node_map, "LineSelector", target)
+        driven = _try_set(node_map, "LineSource", "Timer1Active")
+    if not driven:
+        # no timer on this model — light on for exactly the exposure window
+        _try_set(node_map, "LineSource", "ExposureActive")
+
+
+def _try_execute(node_map, name: str) -> bool:
+    """Execute a GenICam *command* node (e.g. TriggerSoftware). Commands are
+    executed, not assigned, so _try_set silently does nothing for them."""
+    try:
+        getattr(node_map, name).execute()
+        return True
+    except Exception:
+        return False
 
 
 def _reset_aoi_full(node_map) -> None:
@@ -62,10 +134,15 @@ class HarvesterCamera(CameraDevice):
         device_index: int = 0,
         settings: CameraSettings | None = None,
         info: CameraInfo | None = None,
+        serial: str | None = None,
     ) -> None:
         super().__init__(info or CameraInfo(id=camera_id, interface="GigE Vision"), settings)
         self.cti_path = cti_path or os.environ.get("VIS_GENTL_CTI")
         self.device_index = device_index
+        # Serial pins an EXACT camera. Discovery order is not stable across
+        # reboots, so on a multi-camera station an index silently swaps which
+        # physical camera a recipe inspects — set camera.device_id instead.
+        self.serial = (serial or os.environ.get("VIS_CAMERA_DEVICE_ID") or "").strip()
         self._harvester = None
         self._acquirer = None
         self._count = 0
@@ -113,11 +190,24 @@ class HarvesterCamera(CameraDevice):
                 "no GigE Vision cameras found via the GenTL producer; check the "
                 "camera is powered, linked, and on a reachable subnet"
             )
+        index = self.device_index
+        if self.serial:
+            found = [i for i, d in enumerate(self._harvester.device_info_list)
+                     if str(getattr(d, "serial_number", "")).strip() == self.serial]
+            if not found:
+                seen = ", ".join(
+                    f"{getattr(d, 'model', '?')}#{getattr(d, 'serial_number', '?')}"
+                    for d in self._harvester.device_info_list) or "none"
+                raise RuntimeError(
+                    f"no GigE camera with serial {self.serial!r} (camera.device_id); "
+                    f"detected: {seen}"
+                )
+            index = found[0]
         try:
-            self._acquirer = self._harvester.create(self.device_index)
+            self._acquirer = self._harvester.create(index)
         except IndexError as exc:
             raise RuntimeError(
-                f"no camera at device index {self.device_index}; "
+                f"no camera at device index {index}; "
                 f"{len(self._harvester.device_info_list)} device(s) detected"
             ) from exc
         self._count = 0
@@ -204,7 +294,13 @@ class HarvesterCamera(CameraDevice):
         else:
             _try_set(node_map, "TriggerSelector", "FrameStart")
             _try_set(node_map, "TriggerMode", "On")
-            if s.trigger.source:
+            # Software trigger fires from the PC, so the source must be the
+            # camera's Software node — not a physical line. Without this the
+            # camera sits waiting on Line0 for a pulse that never comes and the
+            # live view is simply dead.
+            if s.trigger.mode == TriggerMode.SOFTWARE:
+                _try_set(node_map, "TriggerSource", "Software")
+            elif s.trigger.source:
                 _try_set(node_map, "TriggerSource", s.trigger.source)
             if s.trigger.delay_us:
                 _try_set(node_map, "TriggerDelay", float(s.trigger.delay_us))
@@ -213,11 +309,24 @@ class HarvesterCamera(CameraDevice):
                 for nm in ("LineDebouncerHighTimeAbs", "TriggerDebouncerHighTimeAbs",
                            "LineDebouncerTime"):
                     _try_set(node_map, nm, float(s.trigger.debounce_us))
+        # Lighting last: it selects LineSelector/TimerSelector for its own use,
+        # so it must not run before the trigger nodes above.
+        _apply_strobe(node_map, s.lighting)
         # (re)start streaming once configured
         try:
             self._acquirer.start()
         except Exception:
             pass
+
+    def software_trigger(self) -> bool:
+        """Fire one software trigger (TriggerMode=On, TriggerSource=Software).
+
+        Returns False if the camera does not expose the command, so a caller can
+        tell "fired" from "this camera cannot" instead of assuming a frame is
+        coming. Mirrors HikrobotCamera.software_trigger."""
+        if self._acquirer is None:
+            return False
+        return _try_execute(self._acquirer.remote_device.node_map, "TriggerSoftware")
 
     def set_exposure_gain(self, exposure_us=None, gain_db=None) -> None:
         """Apply exposure/gain to the LIVE stream without stopping it — for a

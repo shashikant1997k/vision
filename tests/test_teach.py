@@ -161,6 +161,147 @@ def _teach_window(sf, user_id):
     )
 
 
+def _burst_window(frames):
+    """A teach window whose 'camera' yields the given frames, then nothing."""
+    from vis.hmi.teach_window import TeachWindow
+
+    supply = list(frames)
+
+    def provider():
+        return supply.pop(0) if supply else None
+
+    return TeachWindow(
+        user_id=1, reference_image=_reference_frame().image,
+        session_factory=None, reject_lanes=["lane1"], image_provider=provider,
+    )
+
+
+def test_burst_capture_fills_the_image_bank():
+    """Teaching off a running line: capture N products, then teach on one and
+    Test all against the rest."""
+    pytest.importorskip("PySide6")
+    _qapp()
+    frames = [_reference_frame().image for _ in range(10)]
+    win = _burst_window(frames)
+
+    win._burst_count.setValue(10)
+    win._start_burst()
+    for _ in range(10):
+        win._live_tick()
+
+    assert len(win._bank) == 10          # the placeholder was replaced, not grown
+    assert win._burst_remaining == 0
+    assert win._live is False            # capture run ends live mode
+    assert win._burst_btn.isEnabled()
+    assert win._reference is win._bank[0]
+
+
+def test_teach_says_it_is_waiting_for_the_trigger():
+    """On a triggered camera the image only updates when a product passes. The
+    screen must say so, or a working setup reads as a frozen application."""
+    pytest.importorskip("PySide6")
+    _qapp()
+    from vis.hmi.teach_window import TeachWindow
+
+    win = TeachWindow(user_id=1, reference_image=_reference_frame().image,
+                      session_factory=None, reject_lanes=["lane1"],
+                      image_provider=lambda: None,
+                      trigger_hint="hardware trigger on Line0")
+    win._go_live()
+    guide = win._guide.text()
+    assert "Line0" in guide and "hardware trigger" in guide
+
+    win._burst_count.setValue(5)
+    win._start_burst()
+    assert "hardware trigger on Line0" in win._guide.text()
+
+
+def test_teach_keeps_the_bench_wording_when_free_running():
+    pytest.importorskip("PySide6")
+    _qapp()
+    from vis.hmi.teach_window import TeachWindow
+
+    win = TeachWindow(user_id=1, reference_image=_reference_frame().image,
+                      session_factory=None, reject_lanes=["lane1"],
+                      image_provider=lambda: None)
+    win._go_live()
+    assert "position the product" in win._guide.text()
+
+
+def test_capture_strip_shows_one_thumbnail_per_image_with_its_time():
+    """10 near-identical blisters — "Image 4 / 10" says nothing about which to
+    teach on, so the strip has to show them."""
+    pytest.importorskip("PySide6")
+    _qapp()
+    frames = [_reference_frame().image for _ in range(6)]
+    win = _burst_window(frames)
+
+    win._burst_count.setValue(6)
+    win._start_burst()
+    for _ in range(6):
+        win._live_tick()
+
+    assert win._thumbs.count() == 6
+    assert win._thumbs.currentRow() == 0
+    for i in range(6):
+        item = win._thumbs.item(i)
+        assert item.text().startswith(f"{i + 1}  ")   # numbered
+        assert ":" in item.text()                    # and time-stamped
+        assert not item.icon().isNull()               # with a real thumbnail
+
+
+def test_selecting_a_thumbnail_changes_the_taught_image():
+    pytest.importorskip("PySide6")
+    _qapp()
+    frames = [_reference_frame().image for _ in range(4)]
+    win = _burst_window(frames)
+
+    win._burst_count.setValue(4)
+    win._start_burst()
+    for _ in range(4):
+        win._live_tick()
+
+    win._thumbs.setCurrentRow(2)                     # operator clicks the third
+    assert win._reference_index == 2
+    assert win._reference is win._bank[2]
+
+    win._next_image()                                # strip follows the arrows too
+    assert win._reference_index == 3
+    assert win._thumbs.currentRow() == 3
+
+
+def test_burst_capture_ignores_frames_that_have_not_arrived():
+    """With a hardware trigger the camera returns nothing between products; a
+    burst must wait for real frames rather than count empty ticks."""
+    pytest.importorskip("PySide6")
+    _qapp()
+    win = _burst_window([])              # provider always returns None
+
+    win._burst_count.setValue(3)
+    win._start_burst()
+    for _ in range(20):
+        win._live_tick()
+
+    assert win._burst_remaining == 3     # nothing captured, still waiting
+    assert win._live is True
+
+
+def test_burst_capture_can_be_ended_early_and_keeps_what_it_got():
+    pytest.importorskip("PySide6")
+    _qapp()
+    win = _burst_window([_reference_frame().image for _ in range(2)])
+
+    win._burst_count.setValue(10)
+    win._start_burst()
+    win._live_tick()
+    win._live_tick()
+    win._snap()                          # operator ends the run early
+
+    assert len(win._bank) == 2
+    assert win._burst_remaining == 0
+    assert win._burst_btn.isEnabled()
+
+
 def test_teach_starts_with_a_default_product():
     pytest.importorskip("PySide6")
     _qapp()

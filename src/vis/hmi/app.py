@@ -89,7 +89,11 @@ def _make_camera_factory():
 
             index = int(os.environ.get("VIS_CAMERA_INDEX", "0"))
             settings = settings or load_settings(camera_id)
-            camera = HarvesterCamera(camera_id, cti_path=cti, device_index=index, settings=settings)
+            # serial (config camera.device_id) pins the exact camera; it wins
+            # over index, which is only stable while discovery order is
+            camera = HarvesterCamera(camera_id, cti_path=cti, device_index=index,
+                                     settings=settings,
+                                     serial=os.environ.get("VIS_CAMERA_DEVICE_ID"))
             camera.open()
             return camera
 
@@ -156,6 +160,37 @@ def selftest() -> int:
         report["detector_model"] = str(det) if det else None
     except Exception as exc:
         report["models_error"] = str(exc)
+    # Which config file actually governs this station — an IQ has to record it,
+    # and "why is it behaving like that" usually ends at the wrong config.
+    try:
+        from ..config import app_dir, config_path, data_dir
+
+        report["app_dir"] = str(app_dir())
+        report["config"] = str(config_path())
+        report["config_exists"] = config_path().is_file()
+        report["data_dir"] = str(data_dir())
+    except Exception as exc:
+        report["config_error"] = str(exc)
+
+    # Which acquisition backends this build can actually use. A bundle built
+    # without the `camera` extra has no harvesters, so it silently falls back to
+    # the simulator on a line PC — the build must fail here instead.
+    backends = ["file", "sim"]
+    try:
+        import harvesters  # noqa: F401
+
+        backends.insert(0, "gentl")
+    except Exception:
+        pass
+    try:
+        from ..camera.hikrobot import load_sdk
+
+        load_sdk()
+        backends.insert(0, "hikrobot")
+    except Exception:
+        pass
+    report["camera_backends"] = backends
+
     try:
         from ..licensing import active_license, machine_fingerprint
 
